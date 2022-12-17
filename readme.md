@@ -11,3 +11,6 @@ To create a new bundle file:
 - for example: `npm run build --input="C:\MySpiraApp" --output="C:\BundleStorage"`
 - the --input parameter is a file path to the folder that the manifest.yaml is in
 - the --output parameter is a file path to the folder to save the .spiraapp file to
+- if you want to build the bundle for debug purposes and not minify any JS code add `--debug` to the command
+
+If there are any errors in the manifest these will be logged in the console.
