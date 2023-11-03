@@ -6,6 +6,14 @@ const FILE_PREFIX = "file://";
 const SPIRA_APP_EXTENSION = "spiraapp";
 const PROPERTIES_WITH_FILES = ["code", "css", "template"];
 
+const typeEnums = {
+    boolean: 1,
+    int: 2,
+    decimal: 3,
+    string: 4,
+    array: 5
+};
+
 /* EXAMPLE USAGE
 if your code is in a folder C:\work-in-progress
 and your Spira app bundle folder is in: C:\git\SpiraTeam\SpiraTest\SpiraAppBundles
@@ -43,116 +51,245 @@ init();
 // Returns a count of the number of errors found
 // @param: manifest: the manifest file converted to JSON
 function validateManifest(manifest) {
-    const rootProps = ["guid", "name", "caption", "summary", "description", "productSummary", "productDescription", "author", "license", "copyright", "url", "icon", "version", "menus", "pageContents", "pageColumns", "dashboards", "settingGroups", "settings", "productSettings"];
-    const rootPropsRequired = ["guid", "name", "version"];
-    
+    const PAGE_ID_MIN = 1;
+    const PAGE_ID_MAX = 20;
+    const DASHBOARD_TYPE_ID_MIN = 1;
+    const DASHBOARD_TYPE_ID_MAX = 6;
+    const SETTING_TYPE_ID_MIN = 1;
+    const SETTING_TYPE_ID_MAX = 9;
+    const ACTION_TYPE_ID_MIN = 1;
+    const ACTION_TYPE_ID_MAX = 2;
 
-    const menuProps = ["pageId", "caption", "icon", "isActive", "entries"];
-    const menuPropsRequired = ["pageId", "caption"];
-    const menuEntryProps = ["name", "caption", "tooltip", "icon", "actionTypeId", "action", "isActive"];
-    const menuEntryPropsRequired = ["name", "caption", "actionTypeId", "action"];
-    
-    const pageContentProps = ["pageId", "name", "code", "css"];
-    const pageContentPropsRequired = ["pageId", "name", "code"];
-    
-    const pageColumnProps = ["pageId", "name", "caption", "template"];
-    const pageColumnPropsRequired = ["pageId", "name", "caption", "template"];
-    
-    const dashboardProps = ["dashboardTypeId", "name", "isActive", "description", "code"];
-    const dashboardPropsRequired = ["dashboardTypeId", "name"];
-    
-    const settingGroupProps = ["name", "caption", "description"];
-    const settingGroupPropsRequired = ["name", "caption"];
-    
-    const settingProps = ["settingTypeId", "name", "caption", "placeholder", "tooltip", "isSecure", "position", "settingGroup"];
-    const settingPropsRequired = ["settingTypeId", "name", "caption"];
-    
-    const productSettingProps = ["settingTypeId", "name", "caption", "placeholder", "tooltip", "isSecure", "position", "settingGroup", "artifactTypeId"];
-    const productSettingPropsRequired = ["settingTypeId", "name", "caption"];
+    const rootProps = [
+        { name: "guid",               required: true,  type: typeEnums.string, max: 64 },
+        { name: "name",               required: true,  type: typeEnums.string, max: 255 }, 
+        { name: "caption",            required: false, type: typeEnums.string, max: 255 }, 
+        { name: "summary",            required: false, type: typeEnums.string, max: 255 }, 
+        { name: "description",        required: false, type: typeEnums.string, max: false }, 
+        { name: "productSummary",     required: false, type: typeEnums.string, max: 255 }, 
+        { name: "productDescription", required: false, type: typeEnums.string, max: false }, 
+        { name: "author",             required: false, type: typeEnums.string, max: 128 }, 
+        { name: "license",            required: false, type: typeEnums.string, max: false }, 
+        { name: "copyright",          required: false, type: typeEnums.string, max: 128 }, 
+        { name: "url",                required: false, type: typeEnums.string, max: 256 }, 
+        { name: "icon",               required: false, type: typeEnums.string, max: false }, 
+        { name: "version",            required: true,  type: typeEnums.decimal, min: 0, max: false }, 
+        { name: "menus",              required: false, type: typeEnums.array }, 
+        { name: "pageContents",       required: false, type: typeEnums.array }, 
+        { name: "pageColumns",        required: false, type: typeEnums.array }, 
+        { name: "dashboards",         required: false, type: typeEnums.array }, 
+        { name: "settingGroups",      required: false, type: typeEnums.array }, 
+        { name: "settings",           required: false, type: typeEnums.array }, 
+        { name: "productSettings",    required: false, type: typeEnums.array }
+    ];
+    const menuProps = [
+        { name: "pageId",   required: true,  type: typeEnums.int,    min: PAGE_ID_MIN, max: PAGE_ID_MAX },
+        { name: "caption",  required: true,  type: typeEnums.string, max: 255 },
+        { name: "icon",     required: false, type: typeEnums.string, max: 255 },
+        { name: "isActive", required: false, type: typeEnums.boolean }, 
+        { name: "entries",  required: false, type: typeEnums.array }
+    ];
+    const menuEntryProps = [
+        { name: "name",         required: true,  type: typeEnums.string, max: 50 },
+        { name: "caption",      required: true,  type: typeEnums.string, max: 128 },
+        { name: "tooltip",      required: false, type: typeEnums.string, max: 255 },
+        { name: "icon",         required: false, type: typeEnums.string, max: 255 },
+        { name: "actionTypeId", required: true,  type: typeEnums.int, min: ACTION_TYPE_ID_MIN, max: ACTION_TYPE_ID_MAX },
+        { name: "action",       required: true,  type: typeEnums.string, max: 255 },
+        { name: "isActive",     required: false, type: typeEnums.boolean }
+    ];
+    const pageContentProps = [
+        { name: "pageId", required: true,  type: typeEnums.int,    min: PAGE_ID_MIN, max: PAGE_ID_MAX },
+        { name: "name",   required: true,  type: typeEnums.string, max: 128 },
+        { name: "code",   required: true,  type: typeEnums.string, max: false },
+        { name: "css",    required: false, type: typeEnums.string, max: false }
+    ];
+    const pageColumnProps = [
+        { name: "pageId",   required: true, type: typeEnums.int,    min: PAGE_ID_MIN, max: PAGE_ID_MAX },   
+        { name: "name",     required: true, type: typeEnums.string, max: 50 },   
+        { name: "caption",  required: true, type: typeEnums.string, max: 50 },    
+        { name: "template", required: true, type: typeEnums.string, max: false },
+    ];
+    const dashboardProps = [
+        { name: "dashboardTypeId", required: false, type: typeEnums.int,    min: DASHBOARD_TYPE_ID_MIN, max: DASHBOARD_TYPE_ID_MAX },  
+        { name: "name",            required: true,  type: typeEnums.string, max: 128 },  
+        { name: "isActive",        required: false, type: typeEnums.boolean },  
+        { name: "description",     required: false, type: typeEnums.string, max: false },   
+        { name: "code",            required: false, type: typeEnums.string, max: false }
+    ];
+    const settingGroupProps = [
+        { name: "name",        required: true,  type: typeEnums.string, max: 50 },     
+        { name: "caption",     required: true,  type: typeEnums.string, max: 255 },  
+        { name: "description", required: false, type: typeEnums.string, max: false }
+    ];
+    const settingProps = [
+        { name: "settingTypeId", required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MAX },    
+        { name: "name",          required: true,  type: typeEnums.string, max: 255 },    
+        { name: "caption",       required: true,  type: typeEnums.string, max: 50 },     
+        { name: "placeholder",   required: false, type: typeEnums.string, max: 255 },  
+        { name: "tooltip",       required: false, type: typeEnums.string, max: 255 },   
+        { name: "isSecure",      required: false, type: typeEnums.boolean },   
+        { name: "position",      required: false, type: typeEnums.int, min: 1, max: false },   
+        { name: "settingGroup",  required: false, type: typeEnums.string, max: 50 }
+    ];   
+    const productSettingProps = [
+        { name: "settingTypeId",  required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MIN },    
+        { name: "name",           required: true,  type: typeEnums.string, max: 255 },    
+        { name: "caption",        required: true,  type: typeEnums.string, max: 50 },     
+        { name: "placeholder",    required: false, type: typeEnums.string, max: 255 },  
+        { name: "tooltip",        required: false, type: typeEnums.string, max: 255 },   
+        { name: "isSecure",       required: false, type: typeEnums.boolean },   
+        { name: "position",       required: false, type: typeEnums.int,    min: 1, max: false },   
+        { name: "settingGroup",   required: false, type: typeEnums.string, max: 50 },   
+        { name: "artifactTypeId", required: false, type: typeEnums.int,    min: -1000, max: false }
+    ];
 
     let hasErrors = 0;
     
-    hasErrors += checkObjectKeys("root", manifest, rootProps, rootPropsRequired, null, null, null);
+    hasErrors += checkObjectForErrors("root", manifest, rootProps, null, null);
 
     if (manifest.hasOwnProperty("menus") && Array.isArray(manifest.menus)) {
         manifest.menus.forEach(menu => {
-            hasErrors += checkObjectKeys("menus", menu, menuProps, menuPropsRequired, "entries", menuEntryProps, menuEntryPropsRequired);
+            hasErrors += checkObjectForErrors("menus", menu, menuProps, "entries", menuEntryProps);
         })
     }
 
     if (manifest.hasOwnProperty("pageContents") && Array.isArray(manifest.pageContents)) {
         manifest.pageContents.forEach(pageContent => {
-            hasErrors += checkObjectKeys("pageContents", pageContent, pageContentProps, pageContentPropsRequired, null, null, null);
+            hasErrors += checkObjectForErrors("pageContents", pageContent, pageContentProps, null, null);
         })
     }
 
     if (manifest.hasOwnProperty("pageColumns") && Array.isArray(manifest.pageColumns)) {
         manifest.pageColumns.forEach(pageColumn => {
-            hasErrors += checkObjectKeys("pageColumns", pageColumn, pageColumnProps, pageColumnPropsRequired, null, null, null);
+            hasErrors += checkObjectForErrors("pageColumns", pageColumn, pageColumnProps, null, null);
         })
     }
 
     if (manifest.hasOwnProperty("dashboards") && Array.isArray(manifest.dashboards)) {
         manifest.dashboards.forEach(dashboard => {
-            hasErrors += checkObjectKeys("dashboards", dashboard, dashboardProps, dashboardPropsRequired, null, null, null);
+            hasErrors += checkObjectForErrors("dashboards", dashboard, dashboardProps, null, null);
         })
     }
 
     if (manifest.hasOwnProperty("settingGroups") && Array.isArray(manifest.settingGroups)) {
         manifest.settingGroups.forEach(settingGroup => {
-            hasErrors += checkObjectKeys("settingGroups", settingGroup, settingGroupProps, settingGroupPropsRequired, null, null, null);
+            hasErrors += checkObjectForErrors("settingGroups", settingGroup, settingGroupProps, null, null);
         })
     }
 
     if (manifest.hasOwnProperty("settings") && Array.isArray(manifest.settings)) {
         manifest.settings.forEach(setting => {
-            hasErrors += checkObjectKeys("settings", setting, settingProps, settingPropsRequired, null, null, null);
+            hasErrors += checkObjectForErrors("settings", setting, settingProps, null, null);
         })
     }
 
     if (manifest.hasOwnProperty("productSettings") && Array.isArray(manifest.productSettings)) {
         manifest.productSettings.forEach(productSetting => {
-            hasErrors += checkObjectKeys("productSettings", productSetting, productSettingProps, productSettingPropsRequired, null, null, null);
+            hasErrors += checkObjectForErrors("productSettings", productSetting, productSettingProps, null, null);
         })
     }
 
     return hasErrors;
 }
 
-// Checks a specific part of the manifest against provided data
+// Checks a specific part of the manifest against the props and requirement for that data structure
 // Returns a count of the number of errors found
 // @param description: string = reference name of the part of the manifest being checked (used for logging)
 // @param obj: object = the part of the manifest to check
-// @param validKeys: array of strings = all accepted keys for this part of the manifest (matches the data object in Spira)
-// @param validKeysRequired: array of strings = all required keys for this part of the manifest
+// @param objectProps: array of objects that describe the data object (matches that in Spira)
 // @param nestedKey: string = the key in the obj that is actually a nested array that also needs to be checked
-// @param nestedValidKeys: array of strings = all accepted keys for this part of the manifest (matches the data object in Spira)
-// @param nestedValidKeysRequired: array of strings = all required keys for this part of the manifest
-function checkObjectKeys(description, obj, validKeys, validKeysRequired, nestedKey, nestedValidKeys, nestedValidKeysRequired) {
+// @param nestedObjectProps: array of objects that describe the NESTED data object (matches that in Spira)
+function checkObjectForErrors(description, obj, objectProps, nestedKey, nestedObjectProps) {
+    const validKeyNames = objectProps.map(prop => prop.name);
+    const requiredKeyNames = objectProps.filter(prop => prop.required).map(prop => prop.name);
+    
     let hasErrors = 0;
-    //verify that each key in the obj is an allowed/valid key
+
+    //verify that each key in the obj is valid
     for (const [key, value] of Object.entries(obj)) {
         //If the key is not valid, increment the error count
-        if (!validKeys.includes(key)) {
+        if (!validKeyNames.includes(key)) {
             console.log(`Error in ${description}: Key ${key} is not allowed`);
             hasErrors++;
-        //If the key has nested items inside, verify those
-        } else if (nestedKey && key == nestedKey && Array.isArray(obj[key])) {
-            obj[key].forEach(nest => {
-                hasErrors += checkObjectKeys(`nest of ${description}`, nest, nestedValidKeys, nestedValidKeysRequired, null, null, null);
-            })
+        //If the key is valid, perform further checks
+        } else { 
+            //Check that the values for each key are valid and within bounds
+            const keyProps = objectProps.filter(prop => prop.name == key)[0];
+            hasErrors += checkValueForErrors(`${key} of ${description}`, value, keyProps.type, keyProps.min, keyProps.max);            
+
+            //If the key has nested items inside, verify those
+            if (nestedKey && key == nestedKey && Array.isArray(obj[key])) {
+                obj[key].forEach(nest => {
+                    hasErrors += checkObjectForErrors(`nest of ${description}`, nest, nestedObjectProps, null, null, null, null);
+                })
+            }
         }
     }
 
     //Make sure all required keys are present and have a value
-    validKeysRequired.forEach(key => {
+    requiredKeyNames.forEach(key => {
         if (!Object.keys(obj).includes(key)) {
             console.log(`Error in ${description}: Required key ${key} not found`);
             hasErrors++;
         }
     })
+
     return hasErrors;
 }
+
+// Checks a specific value against the props for that data type to make sure it correct format and length
+// Returns a count of the number of errors found
+// @param description: string = reference name of the part of the manifest being checked (used for logging)
+// @param val: value = the value to check
+// @param typeEnum: the typeEnums for the key the value maps to
+// @param min: int for the minimum number or length of string
+// @param max: int for the maximum number or length of string
+function checkValueForErrors(description, value, type, min, max) {
+    let hasErrors = 0;
+    switch (type) {
+        case typeEnums.boolean:
+            if (value !== true && value !== false) {
+                console.log(`Error in ${description}: boolean expected, but got ${value}`);
+                hasErrors++;
+            }
+            break;
+        case typeEnums.int:
+            if (Number.isInteger(value)) {
+                if (value < min || (max && value > max) ) {
+                    console.log(`Error in ${description}: ${value} was not in the allowed range of ${min} to ${max}`);
+                hasErrors++;
+                }
+            } else {
+                console.log(`Error in ${description}: int expected, but got ${value}`);
+                hasErrors++;
+            }
+            break;
+        case typeEnums.decimal:
+            if (Number.parseFloat(value)) {
+                if (value < min || (max && value > max) ) {
+                    console.log(`Error in ${description}: ${value} was not in the allowed range of ${min} to ${max}`);
+                hasErrors++;
+                }
+            } else {
+                console.log(`Error in ${description}: decimal expected, but got ${value}`);
+                hasErrors++;
+            }
+            break;
+        case typeEnums.string:
+            //Check for a max value - if there is none let any string through
+            if (max && value.length > max) {
+                console.log(`Error in ${description}: the string is too long - it must be at most ${max} characters`);
+                hasErrors++;
+            }
+        //No need to check arrays - they are handled as nested objects
+        case typeEnums.array:
+            break;
+    }
+
+    return hasErrors;
+}
+
 
 // Creates a bundle file from a json manifest, including all referenced external files
 // @param: manifest: the manifest file converted to JSON
