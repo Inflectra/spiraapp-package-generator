@@ -4,7 +4,10 @@ const UglifyJS = require("uglify-js");
 
 const FILE_PREFIX = "file://";
 const BASE_64_PREFIX = `base64,`;
-const BASE_64_FILE_REGEX = new RegExp(`;${BASE_64_PREFIX}file:(\/\/.+)("|')`);
+const QUOTES = `("|')`;
+const QUOTES_REGEX = new RegExp(`("|')`);
+const BASE_64_FILE_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)${QUOTES}`);
+const BASE_64_ICON_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)`);
 const SPIRA_APP_EXTENSION = "spiraapp";
 const PROPERTIES_WITH_FILES = ["code", "css", "template"];
 
@@ -300,6 +303,8 @@ function createBundle(manifest, inputFolder) {
     const isMinify = process.env.npm_config_debug ? false : true;
 
     let output = manifest;
+    //update the icon to make sure any referenced file is embedded as a base64 encoded string
+    output.icon = replaceFileRefsAsString(manifest.icon, inputFolder, BASE_64_ICON_REGEX);
     
     //find any file reference and replace
     //allowed in pageContents, pageColumns, custom dashboards
@@ -353,7 +358,7 @@ function insertFileInProp(prop, value, folderPath, isMinify) {
         const fileContents = buffer.toString();
 
         // check if the file contains any files that should be base64 encoding (images)
-        let contentToBundle = replaceFileRefsAsString(fileContents, folderPath);
+        let contentToBundle = replaceFileRefsAsString(fileContents, folderPath, BASE_64_FILE_REGEX);
         // if we are minifying check if this is a js file
         if (isMinify && extension == "js") {
             // attempt to minify - if there is an error, use the original file contents
@@ -372,18 +377,19 @@ function insertFileInProp(prop, value, folderPath, isMinify) {
 
 // Updates a string (like a css file) and replaces any references to files that should be base64 encoded
 // @param string: the string to review, update and return
-function replaceFileRefsAsString(string, folderPath) {
+// @param folderPath: the root folder to look int
+// @param regexToUse: RegExp to use for this search and replace
+function replaceFileRefsAsString(string, folderPath, regexToUse) {
     const valueIsString = typeof string === 'string' || string instanceof String;
     let updatedString = string;
-    if (valueIsString && BASE_64_FILE_REGEX.test(string)) {
-        updatedString = string.replace(BASE_64_FILE_REGEX, replacer);
-        console.log(updatedString)
+    if (valueIsString && regexToUse.test(string)) {
+        updatedString = string.replace(regexToUse, replacer);
     }
-
+    
     // internal function to replace the file reference with its base64 encoded contents
-    // @param match: the full regex match
+    // @param match: the regex
     // @param path: the $1 capture group representing the relative filepath
-    // @param quote: the $2 capture group representing the type of quote we need to return
+    // @param quote: the $2 capture group representing the type of quote we need to return - if present
     function replacer(match, path, quote) {
         // retrieve the file (take the relative path and make it absolute)
         const buffer = fs.readFileSync(`${folderPath}${path}`, 'utf-8');
@@ -392,7 +398,7 @@ function replaceFileRefsAsString(string, folderPath) {
         // base64 encode the contents
         const contentsBase64 = contentsBuffer.toString("base64");
         // return an updated string replacing the full match
-        return `${BASE_64_PREFIX}${contentsBase64}${quote}`;
+        return `${BASE_64_PREFIX}${contentsBase64}${QUOTES_REGEX.test(quote) ? quote : ""}`;
     }
     return updatedString;
 }
