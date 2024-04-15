@@ -3,6 +3,8 @@ const fs   = require('fs');
 const UglifyJS = require("uglify-js");
 
 const FILE_PREFIX = "file://";
+const BASE_64_PREFIX = `base64,`;
+const BASE_64_FILE_REGEX = new RegExp(`;${BASE_64_PREFIX}file:(\/\/.+)("|')`);
 const SPIRA_APP_EXTENSION = "spiraapp";
 const PROPERTIES_WITH_FILES = ["code", "css", "template"];
 
@@ -305,7 +307,7 @@ function createBundle(manifest, inputFolder) {
     if (manifest.hasOwnProperty("pageContents") && Array.isArray(manifest.pageContents)) {
         output.pageContents = manifest.pageContents.map(pageContent => {
             for (const prop in pageContent) {
-                pageContent[prop] = insertFile(prop, pageContent[prop], inputFolder, isMinify);
+                pageContent[prop] = insertFileInProp(prop, pageContent[prop], inputFolder, isMinify);
             }
             return pageContent;
         });
@@ -315,7 +317,7 @@ function createBundle(manifest, inputFolder) {
     if (manifest.hasOwnProperty("pageColumns") && Array.isArray(manifest.pageColumns)) {
         output.pageColumns = manifest.pageColumns.map(pageColumn => {
             for (const prop in pageColumn) {
-                pageColumn[prop] = insertFile(prop, pageColumn[prop], inputFolder, isMinify);
+                pageColumn[prop] = insertFileInProp(prop, pageColumn[prop], inputFolder, isMinify);
             }
             return pageColumn;
         });
@@ -325,7 +327,7 @@ function createBundle(manifest, inputFolder) {
     if (manifest.hasOwnProperty("dashboards") && Array.isArray(manifest.dashboards)) {
         output.dashboards = manifest.dashboards.map(dashboard => {
             for (const prop in dashboard) {
-                dashboard[prop] = insertFile(prop, dashboard[prop], inputFolder, isMinify);
+                dashboard[prop] = insertFileInProp(prop, dashboard[prop], inputFolder, isMinify);
             }
             return dashboard;
         });
@@ -338,7 +340,7 @@ function createBundle(manifest, inputFolder) {
 // @param value: the string with the relative path to the file
 // @param folderPath: string = the root folder to look in for the file - from the cli params
 // @param isMinify: bool = whether to minify or not (do not if in debug mode) - from the cli params
-function insertFile(prop, value, folderPath, isMinify) {
+function insertFileInProp(prop, value, folderPath, isMinify) {
     const valueIsString = typeof value === 'string' || value instanceof String;
     const doesPropSupportFile = PROPERTIES_WITH_FILES.includes(prop);
     if (doesPropSupportFile && valueIsString && value.startsWith(FILE_PREFIX)) {
@@ -349,12 +351,13 @@ function insertFile(prop, value, folderPath, isMinify) {
 
         // use the toString() method to convert buffer into String
         const fileContents = buffer.toString();
-        
-        let contentToBundle = fileContents;
+
+        // check if the file contains any files that should be base64 encoding (images)
+        let contentToBundle = replaceFileRefsAsString(fileContents, folderPath);
         // if we are minifying check if this is a js file
         if (isMinify && extension == "js") {
             // attempt to minify - if there is an error, use the original file contents
-            const minified = UglifyJS.minify(fileContents);
+            const minified = UglifyJS.minify(contentToBundle);
             contentToBundle = !minified.error ? minified.code : fileContents;
         }
 
@@ -365,6 +368,33 @@ function insertFile(prop, value, folderPath, isMinify) {
     } else {
         return value;
     }
+}
+
+// Updates a string (like a css file) and replaces any references to files that should be base64 encoded
+// @param string: the string to review, update and return
+function replaceFileRefsAsString(string, folderPath) {
+    const valueIsString = typeof string === 'string' || string instanceof String;
+    let updatedString = string;
+    if (valueIsString && BASE_64_FILE_REGEX.test(string)) {
+        updatedString = string.replace(BASE_64_FILE_REGEX, replacer);
+        console.log(updatedString)
+    }
+
+    // internal function to replace the file reference with its base64 encoded contents
+    // @param match: the full regex match
+    // @param path: the $1 capture group representing the relative filepath
+    // @param quote: the $2 capture group representing the type of quote we need to return
+    function replacer(match, path, quote) {
+        // retrieve the file (take the relative path and make it absolute)
+        const buffer = fs.readFileSync(`${folderPath}${path}`, 'utf-8');
+        const fileContents = buffer.toString();
+        const contentsBuffer = Buffer.from(fileContents);
+        // base64 encode the contents
+        const contentsBase64 = contentsBuffer.toString("base64");
+        // return an updated string replacing the full match
+        return `${BASE_64_PREFIX}${contentsBase64}${quote}`;
+    }
+    return updatedString;
 }
 
 // Saves the final bundle to the designated folder with the correct name and extension
