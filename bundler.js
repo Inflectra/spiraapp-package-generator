@@ -5,7 +5,7 @@ const UglifyJS = require("uglify-js");
 const FILE_PREFIX = "file://";
 const BASE_64_PREFIX = `base64,`;
 const QUOTES = `("|')`;
-const QUOTES_REGEX = new RegExp(`("|'|`)`);
+const QUOTES_REGEX = new RegExp(`("|'|\`)`);
 const BASE_64_FILE_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)${QUOTES}`);
 const BASE_64_ICON_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)`);
 const SPIRA_APP_EXTENSION = "spiraapp";
@@ -138,7 +138,7 @@ function validateManifest(manifest) {
         { name: "settingGroup",  required: false, type: typeEnums.string, max: 50 }
     ];   
     const productSettingProps = [
-        { name: "settingTypeId",  required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MIN },    
+        { name: "settingTypeId",  required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MAX },    
         { name: "name",           required: true,  type: typeEnums.string, max: 255 },    
         { name: "caption",        required: true,  type: typeEnums.string, max: 50 },     
         { name: "placeholder",    required: false, type: typeEnums.string, max: 255 },  
