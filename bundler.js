@@ -3,11 +3,11 @@ const fs   = require('fs');
 const UglifyJS = require("uglify-js");
 
 const FILE_PREFIX = "file://";
-const BASE_64_PREFIX = `base64,`;
+const BASE_64_PREFIX = `;base64,`;
 const QUOTES = `("|')`;
 const QUOTES_REGEX = new RegExp(`("|'|\`)`);
-const BASE_64_FILE_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)${QUOTES}`);
-const BASE_64_ICON_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)`);
+const BASE_64_FILE_REGEX = new RegExp(`${BASE_64_PREFIX}file:\/\/(.+)${QUOTES}`);
+const BASE_64_ICON_REGEX = new RegExp(`${BASE_64_PREFIX}file:\/\/(.+)`);
 const SPIRA_APP_EXTENSION = "spiraapp";
 const PROPERTIES_WITH_FILES = ["code", "css", "template"];
 
