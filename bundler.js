@@ -307,7 +307,7 @@ function createBundle(manifest, inputFolder) {
     output.icon = replaceFileRefsAsString(manifest.icon, inputFolder, BASE_64_ICON_REGEX);
     
     //find any file reference and replace
-    //allowed in pageContents, pageColumns, custom dashboards
+    //allowed in pageContents, pageColumns, custom dashboards, and menus (icons)
     //pageContents
     if (manifest.hasOwnProperty("pageContents") && Array.isArray(manifest.pageContents)) {
         output.pageContents = manifest.pageContents.map(pageContent => {
@@ -315,6 +315,16 @@ function createBundle(manifest, inputFolder) {
                 pageContent[prop] = insertFileInProp(prop, pageContent[prop], inputFolder, isMinify);
             }
             return pageContent;
+        });
+    }
+
+    //menus
+    if (manifest.hasOwnProperty("menu") && Array.isArray(manifest.menu)) {
+        output.menu = manifest.menu.map(menu => {
+            for (const prop in menu) {
+                menu[prop] = insertFileInProp(prop, menu[prop], inputFolder, isMinify);
+            }
+            return menu;
         });
     }
 
