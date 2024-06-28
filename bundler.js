@@ -303,7 +303,7 @@ function createBundle(manifest, inputFolder) {
     let output = manifest;
 
     //find any file reference and replace
-    //allowed in rootProps pageContents, pageColumns, custom dashboards, menus, and menu entries
+    //allowed in rootProps pageContents, pageColumns, custom dashboards
     //rootProps (icon only)
     output.icon = insertFileInProp("icon", manifest.icon, inputFolder, false);
     
@@ -314,26 +314,6 @@ function createBundle(manifest, inputFolder) {
                 pageContent[prop] = insertFileInProp(prop, pageContent[prop], inputFolder, isMinify);
             }
             return pageContent;
-        });
-    }
-
-    //menus
-    if (manifest.hasOwnProperty("menus") && Array.isArray(manifest.menus)) {
-        output.menus = manifest.menus.map(menu => {
-            for (const prop in menu) {
-                menu[prop] = insertFileInProp(prop, menu[prop], inputFolder, isMinify);
-
-                //menu entries
-                if (menu.hasOwnProperty("entries") && Array.isArray(menu.entries)) {
-                    menu.entries = menu.entries.map(entry => {
-                        for (const prop in entry) {
-                            entry[prop] = insertFileInProp(prop, entry[prop], inputFolder, isMinify);
-                        }
-                        return entry;
-                    });
-                }
-            }
-            return menu;
         });
     }
 
@@ -377,24 +357,26 @@ function insertFileInProp(prop, value, folderPath, isMinify) {
         const buffer = fs.readFileSync(`${folderPath}${fileName}`, 'utf-8');
         // use the toString() method to convert buffer into String
         const fileContents = buffer.toString();
-        let finalContents = fileContents;
-
-        //if the property is an svg then we encode the contents and put it into the correct syntax
-        if (PROPERTIES_WITH_SVG_IMAGE.includes(prop) && extension == SVG_EXTENSION) {
-            const rawContentsBuffer = Buffer.from(fileContents);
-            // base64 encode the file contents
-            finalContents = `"${SVG_IMAGE_PREFIX}${rawContentsBuffer.toString("base64")}"`;
+        let processedContents = fileContents;
+        
         // if we are minifying check if this is a js file
-        } else if (isMinify && extension == "js") {
+        if (isMinify && extension == "js") {
             // attempt to minify - if there is an error, use the original file contents
             const minified = UglifyJS.minify(fileContents);
-            finalContents = !minified.error ? minified.code : fileContents;
+            processedContents = !minified.error ? minified.code : fileContents;
         }
 
         // base64 encode the file contents in full
-        const contentsBuffer = Buffer.from(finalContents);
+        const contentsBuffer = Buffer.from(processedContents);
         const contentsBase64 = contentsBuffer.toString("base64");
-        return contentsBase64;
+
+        //if the property is an svg wrap the encoded file contents in the required prefix and suffix
+        if (PROPERTIES_WITH_SVG_IMAGE.includes(prop) && extension == SVG_EXTENSION) {
+            return `${SVG_IMAGE_PREFIX}${contentsBase64}`;
+        } else {
+            return contentsBase64;
+        }
+
     } else {
         return value;
     }
