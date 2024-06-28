@@ -4,6 +4,7 @@ const UglifyJS = require("uglify-js");
 
 const FILE_PREFIX = "file://";
 const SVG_IMAGE_PREFIX = `data:image/svg+xml;base64,`;
+const FILENAME_REGEX = /[^/\\]+?\.\w+/;
 const SVG_EXTENSION = "svg";
 const SPIRA_APP_EXTENSION = "spiraapp";
 const PROPERTIES_WITH_FILES = ["code", "css", "template", "icon"];
@@ -344,13 +345,18 @@ function createBundle(manifest, inputFolder) {
 // @param value: the string with the relative path to the file
 // @param folderPath: string = the root folder to look in for the file - from the cli params
 // @param isMinify: bool = whether to minify or not (do not if in debug mode) - from the cli params
-function insertFileInProp(prop, value, folderPath, isMinify) {
+function insertFileInProp(prop, value, folderPath, isMinify, shouldBase64Encode = true) {
     const valueIsString = typeof value === 'string' || value instanceof String;
     const doesPropSupportFile = PROPERTIES_WITH_FILES.includes(prop);
-    //If the specific prop does not support files or the value is empty, or does not start with a file path then do nothing
-    if (doesPropSupportFile && valueIsString && value.startsWith(FILE_PREFIX)) {
-        //Extract the filename from the raw value
-        const fileName = value.replace(FILE_PREFIX, "");
+    //If the specific prop does not support files or the value is empty, or does not contain a file path then do nothing
+    if (doesPropSupportFile && valueIsString && value.includes(FILE_PREFIX)) {
+        //Extract the filename from the raw value - if we have one
+        const fileString = value.substring(value.indexOf(FILE_PREFIX) + FILE_PREFIX.length);
+        const match = fileString.match(FILENAME_REGEX);
+        if (!match) {
+            return value;
+        }
+        const fileName = match[0];
         const extension = fileName.split('.').pop();
 
         // use the readFileSync() function and pass the path to the file
@@ -359,22 +365,29 @@ function insertFileInProp(prop, value, folderPath, isMinify) {
         const fileContents = buffer.toString();
         let processedContents = fileContents;
         
+        // process any file links inside a CSS or JS file
+        if (extension == "js" || extension == "css") {
+            const shouldBase64Encode = extension == "css";
+            processedContents = insertFileInProp(prop, processedContents, folderPath, false, shouldBase64Encode)
+        }
         // if we are minifying check if this is a js file
         if (isMinify && extension == "js") {
             // attempt to minify - if there is an error, use the original file contents
-            const minified = UglifyJS.minify(fileContents);
-            processedContents = !minified.error ? minified.code : fileContents;
+            const minified = UglifyJS.minify(processedContents);
+            processedContents = !minified.error ? minified.code : processedContents;
         }
 
         // base64 encode the file contents in full
-        const contentsBuffer = Buffer.from(processedContents);
-        const contentsBase64 = contentsBuffer.toString("base64");
+        if (shouldBase64Encode) {
+            const contentsBuffer = Buffer.from(processedContents);
+            processedContents = contentsBuffer.toString("base64");
+        }
 
-        //if the property is an svg wrap the encoded file contents in the required prefix and suffix
+        //if the property is an icon, wrap the encoded file contents in the required prefix
         if (PROPERTIES_WITH_SVG_IMAGE.includes(prop) && extension == SVG_EXTENSION) {
-            return `${SVG_IMAGE_PREFIX}${contentsBase64}`;
+            return `${SVG_IMAGE_PREFIX}${processedContents}`;
         } else {
-            return contentsBase64;
+            return value.replace(FILE_PREFIX, "").replace(fileName, processedContents);
         }
 
     } else {
