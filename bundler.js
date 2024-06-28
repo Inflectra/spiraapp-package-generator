@@ -3,13 +3,12 @@ const fs   = require('fs');
 const UglifyJS = require("uglify-js");
 
 const FILE_PREFIX = "file://";
-const BASE_64_PREFIX = `base64,`;
-const QUOTES = `("|')`;
-const QUOTES_REGEX = new RegExp(`("|'|\`)`);
-const BASE_64_FILE_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)${QUOTES}`);
-const BASE_64_ICON_REGEX = new RegExp(`;${BASE_64_PREFIX}file:\/\/(.+)`);
+const SVG_IMAGE_PREFIX = `data:image/svg+xml;base64,`;
+const FILENAME_REGEX = /[^/\\]+?\.\w+/;
+const SVG_EXTENSION = "svg";
 const SPIRA_APP_EXTENSION = "spiraapp";
-const PROPERTIES_WITH_FILES = ["code", "css", "template"];
+const PROPERTIES_WITH_FILES = ["code", "css", "template", "icon"];
+const PROPERTIES_WITH_SVG_IMAGE = ["icon"];
 
 const typeEnums = {
     boolean: 1,
@@ -303,11 +302,12 @@ function createBundle(manifest, inputFolder) {
     const isMinify = process.env.npm_config_debug ? false : true;
 
     let output = manifest;
-    //update the icon to make sure any referenced file is embedded as a base64 encoded string
-    output.icon = replaceFileRefsAsString(manifest.icon, inputFolder, BASE_64_ICON_REGEX);
-    
+
     //find any file reference and replace
-    //allowed in pageContents, pageColumns, custom dashboards
+    //allowed in rootProps pageContents, pageColumns, custom dashboards
+    //rootProps (icon only)
+    output.icon = insertFileInProp("icon", manifest.icon, inputFolder, false);
+    
     //pageContents
     if (manifest.hasOwnProperty("pageContents") && Array.isArray(manifest.pageContents)) {
         output.pageContents = manifest.pageContents.map(pageContent => {
@@ -345,62 +345,54 @@ function createBundle(manifest, inputFolder) {
 // @param value: the string with the relative path to the file
 // @param folderPath: string = the root folder to look in for the file - from the cli params
 // @param isMinify: bool = whether to minify or not (do not if in debug mode) - from the cli params
-function insertFileInProp(prop, value, folderPath, isMinify) {
+function insertFileInProp(prop, value, folderPath, isMinify, shouldBase64Encode = true) {
     const valueIsString = typeof value === 'string' || value instanceof String;
     const doesPropSupportFile = PROPERTIES_WITH_FILES.includes(prop);
-    if (doesPropSupportFile && valueIsString && value.startsWith(FILE_PREFIX)) {
-        const fileName = value.replace(FILE_PREFIX, "");
+    //If the specific prop does not support files or the value is empty, or does not contain a file path then do nothing
+    if (doesPropSupportFile && valueIsString && value.includes(FILE_PREFIX)) {
+        //Extract the filename from the raw value - if we have one
+        const fileString = value.substring(value.indexOf(FILE_PREFIX) + FILE_PREFIX.length);
+        const match = fileString.match(FILENAME_REGEX);
+        if (!match) {
+            return value;
+        }
+        const fileName = match[0];
         const extension = fileName.split('.').pop();
-        // use the readFileSync() function and pass the path to the file
-        const buffer = fs.readFileSync(`${folderPath}${fileName}`);
 
+        // use the readFileSync() function and pass the path to the file
+        const buffer = fs.readFileSync(`${folderPath}${fileName}`, 'utf-8');
         // use the toString() method to convert buffer into String
         const fileContents = buffer.toString();
-
-        // check if the file contains any files that should be base64 encoding (images)
-        let contentToBundle = replaceFileRefsAsString(fileContents, folderPath, BASE_64_FILE_REGEX);
+        let processedContents = fileContents;
+        
+        // process any file links inside a CSS or JS file
+        if (extension == "js" || extension == "css") {
+            const shouldBase64Encode = extension == "css";
+            processedContents = insertFileInProp(prop, processedContents, folderPath, false, shouldBase64Encode)
+        }
         // if we are minifying check if this is a js file
         if (isMinify && extension == "js") {
             // attempt to minify - if there is an error, use the original file contents
-            const minified = UglifyJS.minify(contentToBundle);
-            contentToBundle = !minified.error ? minified.code : fileContents;
+            const minified = UglifyJS.minify(processedContents);
+            processedContents = !minified.error ? minified.code : processedContents;
         }
 
-        // base64 encode the file contents
-        const contentsBuffer = Buffer.from(contentToBundle);
-        const contentsBase64 = contentsBuffer.toString("base64");
-        return contentsBase64;
+        // base64 encode the file contents in full
+        if (shouldBase64Encode) {
+            const contentsBuffer = Buffer.from(processedContents);
+            processedContents = contentsBuffer.toString("base64");
+        }
+
+        //if the property is an icon, wrap the encoded file contents in the required prefix
+        if (PROPERTIES_WITH_SVG_IMAGE.includes(prop) && extension == SVG_EXTENSION) {
+            return `${SVG_IMAGE_PREFIX}${processedContents}`;
+        } else {
+            return value.replace(FILE_PREFIX, "").replace(fileName, processedContents);
+        }
+
     } else {
         return value;
     }
-}
-
-// Updates a string (like a css file) and replaces any references to files that should be base64 encoded
-// @param string: the string to review, update and return
-// @param folderPath: the root folder to look int
-// @param regexToUse: RegExp to use for this search and replace
-function replaceFileRefsAsString(string, folderPath, regexToUse) {
-    const valueIsString = typeof string === 'string' || string instanceof String;
-    let updatedString = string;
-    if (valueIsString && regexToUse.test(string)) {
-        updatedString = string.replace(regexToUse, replacer);
-    }
-    
-    // internal function to replace the file reference with its base64 encoded contents
-    // @param match: the regex
-    // @param path: the $1 capture group representing the relative filepath
-    // @param quote: the $2 capture group representing the type of quote we need to return - if present
-    function replacer(match, path, quote) {
-        // retrieve the file (take the relative path and make it absolute)
-        const buffer = fs.readFileSync(`${folderPath}${path}`, 'utf-8');
-        const fileContents = buffer.toString();
-        const contentsBuffer = Buffer.from(fileContents);
-        // base64 encode the contents
-        const contentsBase64 = contentsBuffer.toString("base64");
-        // return an updated string replacing the full match
-        return `${BASE_64_PREFIX}${contentsBase64}${QUOTES_REGEX.test(quote) ? quote : ""}`;
-    }
-    return updatedString;
 }
 
 // Saves the final bundle to the designated folder with the correct name and extension
