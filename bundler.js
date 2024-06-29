@@ -3,12 +3,8 @@ const fs   = require('fs');
 const UglifyJS = require("uglify-js");
 
 const FILE_PREFIX = "file://";
-const SVG_IMAGE_PREFIX = `data:image/svg+xml;base64,`;
-const FILENAME_REGEX = /[^/\\]+?\.\w+/;
-const SVG_EXTENSION = "svg";
+const FILENAME_WITH_PREFIX_REGEX = /file:\/\/[^/\\]+?\.\w+/g;
 const SPIRA_APP_EXTENSION = "spiraapp";
-const PROPERTIES_WITH_FILES = ["code", "css", "template", "icon"];
-const PROPERTIES_WITH_SVG_IMAGE = ["icon"];
 
 const typeEnums = {
     boolean: 1,
@@ -17,6 +13,11 @@ const typeEnums = {
     string: 4,
     array: 5
 };
+
+//argument related const
+const FOLDER_INPUT = process.env.npm_config_input ? (process.env.npm_config_input + "/") : "";
+const FOLDER_OUTPUT = process.env.npm_config_output ? (process.env.npm_config_output + "/") : "";
+const IS_DEBUG = process.env.npm_config_debug ? true : false;
 
 /* EXAMPLE USAGE
 if your code is in a folder C:\work-in-progress
@@ -30,20 +31,18 @@ If testing add the --debug flag to the command (this will NOT minify the code)
 
 function init() {
     let fsWait = false;
-    const inputFolder = process.env.npm_config_input ? (process.env.npm_config_input + "/") : "";
-    const outputFolder = process.env.npm_config_output ? (process.env.npm_config_output + "/") : "";
     
     if (process.argv.includes('bundle')) {
-        if (!fs.existsSync(`${inputFolder}manifest.yaml`)) {
-            console.log('Error: no manifest file found in', inputFolder);
+        if (!fs.existsSync(`${FOLDER_INPUT}manifest.yaml`)) {
+            console.log('Error: no manifest file found in', FOLDER_INPUT);
             return;
         }
-        const manifest = yaml.load(fs.readFileSync(`${inputFolder}manifest.yaml`));
+        const manifest = yaml.load(fs.readFileSync(`${FOLDER_INPUT}manifest.yaml`));
 
         const hasErrors = validateManifest(manifest);
         if (hasErrors == 0) {
-            const bundle = createBundle(manifest, inputFolder);
-            saveFile(bundle, outputFolder);
+            const bundle = createBundle(manifest);
+            saveFile(bundle);
         } else {
             console.log('SpiraApp bundle NOT created due to errors in the manifest. Please fix and try again.')
         }
@@ -294,119 +293,90 @@ function checkValueForErrors(description, value, type, min, max) {
     return hasErrors;
 }
 
-
 // Creates a bundle file from a json manifest, including all referenced external files
 // @param: manifest: the manifest file converted to JSON
-// @param inputFolder: the inputFolder to look in for the file - from the cli params
-function createBundle(manifest, inputFolder) {
-    const isMinify = process.env.npm_config_debug ? false : true;
+function createBundle(manifest) {
 
-    let output = manifest;
-
-    //find any file reference and replace
-    //allowed in rootProps pageContents, pageColumns, custom dashboards
-    //rootProps (icon only)
-    output.icon = insertFileInProp("icon", manifest.icon, inputFolder, false);
-    
-    //pageContents
-    if (manifest.hasOwnProperty("pageContents") && Array.isArray(manifest.pageContents)) {
-        output.pageContents = manifest.pageContents.map(pageContent => {
-            for (const prop in pageContent) {
-                pageContent[prop] = insertFileInProp(prop, pageContent[prop], inputFolder, isMinify);
-            }
-            return pageContent;
-        });
-    }
-
-    //pageColumns
-    if (manifest.hasOwnProperty("pageColumns") && Array.isArray(manifest.pageColumns)) {
-        output.pageColumns = manifest.pageColumns.map(pageColumn => {
-            for (const prop in pageColumn) {
-                pageColumn[prop] = insertFileInProp(prop, pageColumn[prop], inputFolder, isMinify);
-            }
-            return pageColumn;
-        });
-    }
-
-    //dashboards
-    if (manifest.hasOwnProperty("dashboards") && Array.isArray(manifest.dashboards)) {
-        output.dashboards = manifest.dashboards.map(dashboard => {
-            for (const prop in dashboard) {
-                dashboard[prop] = insertFileInProp(prop, dashboard[prop], inputFolder, isMinify);
-            }
-            return dashboard;
-        });
-    }
+    const output = findAndReplace(JSON.stringify(manifest), FILENAME_WITH_PREFIX_REGEX, injectFile, null);
     return output;
 }
 
-// If the param references another file then get the contents, prepare it for bundling and return it
-// @param prop: the property name so we can check if it needs to be a file
-// @param value: the string with the relative path to the file
-// @param folderPath: string = the root folder to look in for the file - from the cli params
-// @param isMinify: bool = whether to minify or not (do not if in debug mode) - from the cli params
-function insertFileInProp(prop, value, folderPath, isMinify, shouldBase64Encode = true) {
-    const valueIsString = typeof value === 'string' || value instanceof String;
-    const doesPropSupportFile = PROPERTIES_WITH_FILES.includes(prop);
-    //If the specific prop does not support files or the value is empty, or does not contain a file path then do nothing
-    if (doesPropSupportFile && valueIsString && value.includes(FILE_PREFIX)) {
-        //Extract the filename from the raw value - if we have one
-        const fileString = value.substring(value.indexOf(FILE_PREFIX) + FILE_PREFIX.length);
-        const match = fileString.match(FILENAME_REGEX);
-        if (!match) {
-            return value;
-        }
-        const fileName = match[0];
-        const extension = fileName.split('.').pop();
+// Wrapper function to find and replace all external files references
+// @param data: string of the data to find and replace
+// @param regex: regular expression to search the data string for
+// @param replacementFunc: the replacer function to call for all matches
+// @param parentExtension: string of the extension of the parent
+function findAndReplace(data, regex, replacementFunc, parentExtension) {
+    return data.replace(regex, (match, ...groups) => replacementFunc(match, ...groups, parentExtension));
+}
 
-        // use the readFileSync() function and pass the path to the file
-        const buffer = fs.readFileSync(`${folderPath}${fileName}`, 'utf-8');
-        // use the toString() method to convert buffer into String
-        const fileContents = buffer.toString();
-        let processedContents = fileContents;
-        
-        // process any file links inside a CSS or JS file
-        if (extension == "js" || extension == "css") {
-            const shouldBase64Encode = extension == "css";
-            processedContents = insertFileInProp(prop, processedContents, folderPath, false, shouldBase64Encode)
-        }
-        // if we are minifying check if this is a js file
-        if (isMinify && extension == "js") {
-            // attempt to minify - if there is an error, use the original file contents
-            const minified = UglifyJS.minify(processedContents);
-            processedContents = !minified.error ? minified.code : processedContents;
-        }
+// Replaces a match to a file reference with the contents of the actual file, often base64 encoded
+// @param match: string.replace match
+// @param groups: group matches from string.replace (not used)
+// @param parentExtension: string of the extension of the parent, if present - used to set logic on if reference file should be encoded or not
+function injectFile(match, groups, parentExtension) {
+    //Extract the filename from the match
+    const fileName = match.replace(FILE_PREFIX, "");
+    const extension = fileName.split('.').pop();
 
-        // base64 encode the file contents in full
-        if (shouldBase64Encode) {
-            const contentsBuffer = Buffer.from(processedContents);
-            processedContents = contentsBuffer.toString("base64");
-        }
-
-        //if the property is an icon, wrap the encoded file contents in the required prefix
-        if (PROPERTIES_WITH_SVG_IMAGE.includes(prop) && extension == SVG_EXTENSION) {
-            return `${SVG_IMAGE_PREFIX}${processedContents}`;
-        } else {
-            return value.replace(FILE_PREFIX, "").replace(fileName, processedContents);
-        }
-
-    } else {
-        return value;
+    // use the readFileSync() function and pass the path to the file
+    // use the toString() method to convert buffer into String
+    const buffer = fs.readFileSync(`${FOLDER_INPUT}${fileName}`, 'utf-8');
+    const fileContents = buffer.toString();
+    let processedContents = fileContents;
+    
+    // process any file links inside a CSS or JS file
+    if (extension == "js" || extension == "css") {
+        processedContents = findAndReplace(processedContents, FILENAME_WITH_PREFIX_REGEX, injectFile, extension);
     }
+    // if we are minifying check if this is a js file
+    if (!IS_DEBUG && extension == "js") {
+        // attempt to minify - if there is an error, use the original file contents
+        const minified = UglifyJS.minify(processedContents);
+        processedContents = !minified.error ? minified.code : processedContents;
+    }
+
+    // base64 encode the file contents in full
+    let isEncode = isEncodeCheck(extension, parentExtension);
+    if (isEncode) {
+        const contentsBuffer = Buffer.from(processedContents);
+        processedContents = contentsBuffer.toString("base64");
+    }
+
+    return match.replace(FILE_PREFIX, "").replace(fileName, processedContents);
+}
+
+// Utility function to determine if a file should be base64 encoded on insertion
+// @param extension: string of the extension of the file
+// @param parentExtension: string of the extension of the parent (if present)
+function isEncodeCheck(extension, parentExtension) {
+    //If the file is not being embedded in another file (ie is in the manifest) then always encode
+    if (!parentExtension) {
+        return true;
+    }
+
+    //If embedding a file in a parent of the same type (eg js in js, or css in css) do not encode
+    if (parentExtension == extension) {
+        return false;
+    //If embedding a file into a JS file, don't encode certain filetypes
+    } else if (parentExtension == "js") {
+        const doNotEncodeList = ["js", "json"];
+        return !doNotEncodeList.includes(extension);
+    } else {
+        return true;
+    } 
 }
 
 // Saves the final bundle to the designated folder with the correct name and extension
 // @param bundle: object = the final bundle object with all files embedded
-// @param outputFolder: string = the outputFolder to save the file - from the cli params
-function saveFile(bundle, outputFolder) {
+function saveFile(bundle) {
     //Create base 64 encoded version of the object
-    const finalString = JSON.stringify(bundle);
-    const finalBuffer = Buffer.from(finalString);
+    const finalBuffer = Buffer.from(bundle);
     const finalBase64 = finalBuffer.toString("base64");
     //Write file
-    fs.writeFile(`${outputFolder}${bundle.guid}.${SPIRA_APP_EXTENSION}`, finalBase64, (err) => {
+    fs.writeFile(`${FOLDER_OUTPUT}${bundle.guid}.${SPIRA_APP_EXTENSION}`, finalBase64, (err) => {
         // throws an error, you could also catch it here
         if (err) throw err;
-        console.log(`Successfully created "${bundle.name}" bundle - saved to ${outputFolder}${bundle.guid}.${SPIRA_APP_EXTENSION}`);
+        console.log(`Successfully created "${bundle.name}" bundle - saved to ${FOLDER_OUTPUT}${bundle.guid}.${SPIRA_APP_EXTENSION}`);
     });
 }
