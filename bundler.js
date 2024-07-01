@@ -41,8 +41,10 @@ function init() {
 
         const hasErrors = validateManifest(manifest);
         if (hasErrors == 0) {
+            const guid = manifest.guid;
+            const name = manifest.name;
             const bundle = createBundle(manifest);
-            saveFile(bundle);
+            saveFile(bundle, guid, name);
         } else {
             console.log('SpiraApp bundle NOT created due to errors in the manifest. Please fix and try again.')
         }
@@ -307,14 +309,13 @@ function createBundle(manifest) {
 // @param replacementFunc: the replacer function to call for all matches
 // @param parentExtension: string of the extension of the parent
 function findAndReplace(data, regex, replacementFunc, parentExtension) {
-    return data.replace(regex, (match, ...groups) => replacementFunc(match, ...groups, parentExtension));
+    return data.replace(regex, (match, ...groups) => replacementFunc(match, parentExtension));
 }
 
 // Replaces a match to a file reference with the contents of the actual file, often base64 encoded
 // @param match: string.replace match
-// @param groups: group matches from string.replace (not used)
 // @param parentExtension: string of the extension of the parent, if present - used to set logic on if reference file should be encoded or not
-function injectFile(match, groups, parentExtension) {
+function injectFile(match, parentExtension) {
     //Extract the filename from the match
     const fileName = match.replace(FILE_PREFIX, "");
     const extension = fileName.split('.').pop();
@@ -368,14 +369,14 @@ function isEncodeCheck(extension, parentExtension) {
 
 // Saves the final bundle to the designated folder with the correct name and extension
 // @param bundle: object = the final bundle object with all files embedded
-function saveFile(bundle) {
+function saveFile(bundle, guid, name) {
     //Create base 64 encoded version of the object
     const finalBuffer = Buffer.from(bundle);
     const finalBase64 = finalBuffer.toString("base64");
     //Write file
-    fs.writeFile(`${FOLDER_OUTPUT}${bundle.guid}.${SPIRA_APP_EXTENSION}`, finalBase64, (err) => {
+    fs.writeFile(`${FOLDER_OUTPUT}${guid}.${SPIRA_APP_EXTENSION}`, finalBase64, (err) => {
         // throws an error, you could also catch it here
         if (err) throw err;
-        console.log(`Successfully created "${bundle.name}" bundle - saved to ${FOLDER_OUTPUT}${bundle.guid}.${SPIRA_APP_EXTENSION}`);
+        console.log(`Successfully created "${name}" bundle - saved to ${FOLDER_OUTPUT}${guid}.${SPIRA_APP_EXTENSION}`);
     });
 }
