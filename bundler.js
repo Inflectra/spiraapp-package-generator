@@ -318,7 +318,7 @@ function findAndReplace(data, regex, replacementFunc, parentExtension) {
 function injectFile(match, parentExtension) {
     //Extract the filename from the match
     const fileName = match.replace(FILE_PREFIX, "");
-    const extension = fileName.split('.').pop();
+    const extension = fileName.split('.').pop().toLowerCase();
 
     // use the readFileSync() function and pass the path to the file
     // use the toString() method to convert buffer into String
@@ -360,7 +360,7 @@ function isEncodeCheck(extension, parentExtension) {
         return false;
     //If embedding a file into a JS file, don't encode certain filetypes
     } else if (parentExtension == "js") {
-        const doNotEncodeList = ["js", "json"];
+        const doNotEncodeList = ["js", "json", "html"];
         return !doNotEncodeList.includes(extension);
     } else {
         return true;
