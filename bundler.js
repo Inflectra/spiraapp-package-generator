@@ -329,7 +329,7 @@ function injectFile(match, groups, parentExtension) {
     if (extension == "js" || extension == "css") {
         processedContents = findAndReplace(processedContents, FILENAME_WITH_PREFIX_REGEX, injectFile, extension);
     }
-    // if we are minifying check if this is a js file
+    // In debug mode, we do not minify JS files, otherwise we minify them
     if (!IS_DEBUG && extension == "js") {
         // attempt to minify - if there is an error, use the original file contents
         const minified = UglifyJS.minify(processedContents);
@@ -342,7 +342,6 @@ function injectFile(match, groups, parentExtension) {
         const contentsBuffer = Buffer.from(processedContents);
         processedContents = contentsBuffer.toString("base64");
     }
-
     return match.replace(FILE_PREFIX, "").replace(fileName, processedContents);
 }
 
