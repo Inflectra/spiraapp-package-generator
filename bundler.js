@@ -360,7 +360,7 @@ function isEncodeCheck(extension, parentExtension) {
         return false;
     //If embedding a file into a JS file, don't encode certain filetypes
     } else if (parentExtension == "js") {
-        const doNotEncodeList = ["js", "json", "html"];
+        const doNotEncodeList = ["js", "json", "html", "txt", "md"];
         return !doNotEncodeList.includes(extension);
     } else {
         return true;
