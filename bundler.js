@@ -61,7 +61,7 @@ function validateManifest(manifest) {
     const DASHBOARD_TYPE_ID_MIN = 1;
     const DASHBOARD_TYPE_ID_MAX = 6;
     const SETTING_TYPE_ID_MIN = 1;
-    const SETTING_TYPE_ID_MAX = 9;
+    const SETTING_TYPE_ID_MAX = 10;
     const ACTION_TYPE_ID_MIN = 1;
     const ACTION_TYPE_ID_MAX = 2;
 
