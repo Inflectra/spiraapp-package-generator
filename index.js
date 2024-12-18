@@ -86,7 +86,8 @@ function validateManifest(manifest) {
         { name: "dashboards",         required: false, type: typeEnums.array }, 
         { name: "settingGroups",      required: false, type: typeEnums.array }, 
         { name: "settings",           required: false, type: typeEnums.array }, 
-        { name: "productSettings",    required: false, type: typeEnums.array }
+        { name: "productSettings",    required: false, type: typeEnums.array },
+        { name: "storage",            required: false, type: typeEnums.array },
     ];
     const menuProps = [
         { name: "pageId",   required: true,  type: typeEnums.int,    min: PAGE_ID_MIN, max: PAGE_ID_MAX },
@@ -149,6 +150,11 @@ function validateManifest(manifest) {
         { name: "settingGroup",   required: false, type: typeEnums.string, max: 50 },   
         { name: "artifactTypeId", required: false, type: typeEnums.int,    min: -1000, max: false }
     ];
+    const storageProps = [
+        { name: "key",      required: true,  type: typeEnums.string, max: 128 },    
+        { name: "value",    required: true,  type: typeEnums.string, max: 255 },    
+        { name: "isSecure", required: false, type: typeEnums.boolean },   
+    ];
 
     let hasErrors = 0;
     
@@ -196,6 +202,12 @@ function validateManifest(manifest) {
         })
     }
 
+    if (manifest.hasOwnProperty("storage") && Array.isArray(manifest.storage)) {
+        manifest.storage.forEach(storageItem => {
+            hasErrors += checkObjectForErrors("storage", storageItem, storageProps, null, null);
+        })
+    }
+
     return hasErrors;
 }
 
@@ -216,13 +228,13 @@ function checkObjectForErrors(description, obj, objectProps, nestedKey, nestedOb
     for (const [key, value] of Object.entries(obj)) {
         //If the key is not valid, increment the error count
         if (!validKeyNames.includes(key)) {
-            console.log(`Error in ${description}: Key ${key} is not allowed`);
+            console.log(`Error in ${description}: Key '${key}' is not allowed`);
             hasErrors++;
         //If the key is valid, perform further checks
         } else { 
             //Check that the values for each key are valid and within bounds
             const keyProps = objectProps.filter(prop => prop.name == key)[0];
-            hasErrors += checkValueForErrors(`${key} of ${description}`, value, keyProps.type, keyProps.min, keyProps.max);            
+            hasErrors += checkValueForErrors(`'${key}' of '${description}'`, value, keyProps.type, keyProps.min, keyProps.max);            
 
             //If the key has nested items inside, verify those
             if (nestedKey && key == nestedKey && Array.isArray(obj[key])) {
