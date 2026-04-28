@@ -1,17 +1,23 @@
 {
   "dependencies": {
+    "dotenv": "^17.4.2",
     "js-yaml": "^4.1.1",
+    "playwright": "^1.59.1",
     "uglify-js": "^3.17.4"
   },
   "name": "spiraappvalidator",
   "version": "2.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "node index.js $INPUT $OUTPUT"
+    "test": "node --test test/**/*.test.js",
+    "build": "node index.js $INPUT $OUTPUT",
+    "automate": "node bundle-automation.js"
   },
   "bin": "./index.js",
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "fast-check": "^3.23.2"
+  }
 }
