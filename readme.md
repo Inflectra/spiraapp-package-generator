@@ -12,7 +12,7 @@ The package file is automatically given the correct name based on the SpiraApp's
 
 ## Building a SpiraApp Package
 
-To create a new bundle file manually:
+To create new bundle file manually:
 
 ```bash
 npm run build --input=/path/to/SpiraApp --output=/path/to/output
