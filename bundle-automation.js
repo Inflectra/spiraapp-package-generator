@@ -10,7 +10,20 @@ delete process.env.npm_config_debug;
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
+const yaml = require('js-yaml');
 const { chromium } = require('playwright');
+
+// Helper: normalize base URL by removing trailing slashes
+function normalizeBaseUrl(url) {
+  return url.replace(/\/+$/, '');
+}
+
+// Helper: read and parse manifest.yaml
+function readManifest(inputFolder) {
+  const manifestPath = path.join(inputFolder, 'manifest.yaml');
+  const raw = fs.readFileSync(manifestPath, 'utf-8');
+  return { manifest: yaml.load(raw), manifestPath, raw };
+}
 
 /**
  * Parse CLI arguments and validate the --input folder.
@@ -115,24 +128,18 @@ function loadEnv() {
  * e.g. 1.0 → 1.1, 1.9 → 1.10, 2.5 → 2.6
  *
  * @param {string} manifestPath - absolute path to manifest.yaml
+ * @param {string} raw - raw YAML content
+ * @param {object} manifest - parsed manifest object
  * @returns {string} the new version string
  */
-function bumpVersion(manifestPath) {
-  const yaml = require('js-yaml');
-  const raw = fs.readFileSync(manifestPath, 'utf-8');
-  const manifest = yaml.load(raw);
-
+function bumpVersion(manifestPath, raw, manifest) {
   const current = String(manifest.version);
   const parts = current.split('.');
   const major = parts[0] || '1';
   const minor = parseInt(parts[1] || '0', 10);
   const newVersion = `${major}.${minor + 1}`;
 
-  // Replace the version line in the raw file to preserve formatting/comments
-  const updated = raw.replace(
-    /^version:\s*.+$/m,
-    `version: ${newVersion}`
-  );
+  const updated = raw.replace(/^version:\s*.+$/m, `version: ${newVersion}`);
   fs.writeFileSync(manifestPath, updated, 'utf-8');
   console.log(`Version bumped: ${current} → ${newVersion}`);
   return newVersion;
@@ -158,8 +165,6 @@ function bumpVersion(manifestPath) {
  * @returns {{ spiraappPath: string, appName: string }}
  */
 function runBuild(inputFolder, outputFolder) {
-  const yaml = require('js-yaml');
-
   // 1. Ensure output folder exists
   fs.mkdirSync(outputFolder, { recursive: true });
 
@@ -167,8 +172,8 @@ function runBuild(inputFolder, outputFolder) {
   const resolvedOutput = path.resolve(outputFolder);
 
   // Auto-increment version in manifest.yaml before building
-  const manifestPath = path.join(resolvedInput, 'manifest.yaml');
-  bumpVersion(manifestPath);
+  const { manifest, manifestPath, raw } = readManifest(resolvedInput);
+  bumpVersion(manifestPath, raw, manifest);
 
   // 2. Temporarily set env vars (index.js reads these at module load time)
   const prevInput  = process.env.npm_config_input;
@@ -221,14 +226,11 @@ function runBuild(inputFolder, outputFolder) {
   if (!spiraappFile) {
     throw new Error(`Build completed but no .spiraapp file found in: ${resolvedOutput}`);
   }
-  const spiraappPath = path.join(resolvedOutput, spiraappFile);
 
-  // 8. Read manifest.yaml to get appName (manifestPath already defined above)
-  const manifest = yaml.load(fs.readFileSync(manifestPath, 'utf-8'));
-  const appName = manifest.name;
-
-  // 9. Return result
-  return { spiraappPath, appName };
+  return { 
+    spiraappPath: path.join(resolvedOutput, spiraappFile), 
+    appName: manifest.name 
+  };
 }
 
 /**
@@ -242,11 +244,8 @@ function runBuild(inputFolder, outputFolder) {
  * @param {{ baseUrl: string, username: string, password: string }} config
  */
 async function login(page, config) {
-  // Normalise trailing slash then build login URL
-  const base = config.baseUrl.replace(/\/+$/, '');
-  const loginUrl = `${base}/Login.aspx`;
-
-  await page.goto(loginUrl);
+  const base = normalizeBaseUrl(config.baseUrl);
+  await page.goto(`${base}/Login.aspx`);
 
   // Fill credentials and submit
   await page.fill('input[name="txtUserName"], input[id*="UserName"], input[type="text"]', config.username);
@@ -272,8 +271,7 @@ async function login(page, config) {
 
   if (errorVisible || currentUrl.includes('Login')) {
     throw new Error(
-      `Login failed for user "${config.username}" at ${loginUrl}. ` +
-      'Check your credentials and that the Spira instance is reachable.'
+      `Login failed for user "${config.username}". Check credentials and Spira instance availability.`
     );
   }
 }
@@ -289,8 +287,7 @@ async function login(page, config) {
  * @param {{ baseUrl: string }} config
  */
 async function enableDeveloperMode(page, config) {
-  const base = config.baseUrl.replace(/\/+$/, '');
-  await page.goto(`${base}/Administration/GeneralSettings.aspx`);
+  await page.goto(`${normalizeBaseUrl(config.baseUrl)}/Administration/GeneralSettings.aspx`);
   await page.waitForLoadState('networkidle');
 
   // Locate the Developer Mode checkbox by its known id
@@ -412,160 +409,116 @@ async function activateSpiraApp(page, appName) {
 }
 
 /**
- * Enable the SpiraApp for a specific product via Product Admin > SpiraApps.
+ * Toggle SpiraApp for a specific product (enable or disable).
  *
  * @param {import('playwright').Page} page
  * @param {string} baseUrl
  * @param {string} projectId
  * @param {string} appName
+ * @param {boolean} enable - true to enable, false to disable
  */
-async function enableForProduct(page, baseUrl, projectId, appName) {
-  const base = baseUrl.replace(/\/+$/, '');
-  const url = `${base}/${projectId}/Administration/SpiraApps.aspx`;
+async function toggleForProduct(page, baseUrl, projectId, appName, enable) {
+  const action = enable ? 'Enabling' : 'Disabling';
+  const linkSelector = enable ? 'a[id*="lnkActivate_"]' : 'a[id*="lnkDeactivate"]';
+  const alreadyState = enable ? 'enabled' : 'disabled';
 
-  console.log(`Enabling SpiraApp for project ${projectId}...`);
-  await page.goto(url);
+  console.log(`${action} SpiraApp for project ${projectId}...`);
+  await page.goto(`${normalizeBaseUrl(baseUrl)}/${projectId}/Administration/SpiraApps.aspx`);
   await page.waitForLoadState('networkidle');
 
-  // Find all activate links — use $ to match end of id segment to avoid matching lnkDeactivate
-  const activateLinks = page.locator('a[id*="lnkActivate_"]');
-  const count = await activateLinks.count();
+  const links = page.locator(linkSelector);
+  const count = await links.count();
 
   if (count === 0) {
-    console.log(`SpiraApp "${appName}" already enabled for project ${projectId}.`);
+    console.log(`SpiraApp "${appName}" already ${alreadyState} for project ${projectId}.`);
     return;
   }
 
-  // Find the activate link whose ancestor row contains the app name
-  let clicked = false;
   for (let i = 0; i < count; i++) {
-    const link = activateLinks.nth(i);
-    const row = link.locator('xpath=ancestor::tr').first();
-    const rowText = await row.innerText().catch(() => '');
-    if (rowText.includes(appName)) {
-      // Use dispatchEvent to simulate a real click — avoids strict mode issues
-      // with ASP.NET's __doPostBack when called via page.evaluate
-      await link.dispatchEvent('click');
-      // Wait for the full ASP.NET postback to complete
-      await page.waitForTimeout(2000);
-      await page.waitForLoadState('networkidle');
-      clicked = true;
-      break;
-    }
-  }
-
-  if (clicked) {
-    console.log(`SpiraApp "${appName}" enabled for project ${projectId}.`);
-  } else {
-    console.log(`SpiraApp "${appName}" already enabled for project ${projectId}.`);
-  }
-}
-
-/**
- * Disable the SpiraApp for a specific product.
- *
- * @param {import('playwright').Page} page
- * @param {string} baseUrl
- * @param {string} projectId
- * @param {string} appName
- */
-async function disableForProduct(page, baseUrl, projectId, appName) {
-  const base = baseUrl.replace(/\/+$/, '');
-  const url = `${base}/${projectId}/Administration/SpiraApps.aspx`;
-
-  console.log(`Disabling SpiraApp for project ${projectId}...`);
-  await page.goto(url);
-  await page.waitForLoadState('networkidle');
-
-  // Find all deactivate links
-  const deactivateLinks = page.locator('a[id*="lnkDeactivate"]');
-  const count = await deactivateLinks.count();
-
-  if (count === 0) {
-    console.log(`SpiraApp "${appName}" already disabled for project ${projectId}.`);
-    return;
-  }
-
-  let clicked = false;
-  for (let i = 0; i < count; i++) {
-    const link = deactivateLinks.nth(i);
+    const link = links.nth(i);
     const row = link.locator('xpath=ancestor::tr').first();
     const rowText = await row.innerText().catch(() => '');
     if (rowText.includes(appName)) {
       await link.dispatchEvent('click');
       await page.waitForTimeout(2000);
       await page.waitForLoadState('networkidle');
-      clicked = true;
-      break;
+      console.log(`SpiraApp "${appName}" ${alreadyState} for project ${projectId}.`);
+      return;
     }
   }
 
-  if (clicked) {
-    console.log(`SpiraApp "${appName}" disabled for project ${projectId}.`);
-  } else {
-    console.log(`SpiraApp "${appName}" already disabled for project ${projectId}.`);
-  }
+  console.log(`SpiraApp "${appName}" already ${alreadyState} for project ${projectId}.`);
 }
 
 /**
- * Run the full Playwright automation sequence: login, enable developer mode,
- * upload the SpiraApp, verify the upload, and activate it system-wide.
+ * Run browser automation with a callback function.
+ * Handles browser launch, login, and cleanup.
  *
- * Launches a non-headless Chromium browser so developers can observe the
- * automation. The browser is always closed in the `finally` block regardless
- * of success or failure.
- *
- * @param {{ baseUrl: string, username: string, password: string }} config
- * @param {string} spiraappPath - absolute path to the .spiraapp file
- * @param {string} appName - SpiraApp name (from manifest.yaml)
+ * @param {object} config - environment configuration
+ * @param {Function} callback - async function that receives the page object
  */
-async function runAutomation(config, spiraappPath, appName) {
-  const browser = await chromium.launch({ headless: false });
+async function withBrowser(config, callback) {
+  const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
     await login(page, config);
+    await page.waitForTimeout(1000);
+    await callback(page);
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Run the full automation: build, upload, activate, and enable for projects.
+ */
+async function runAutomation(config, spiraappPath, appName) {
+  await withBrowser(config, async (page) => {
     await enableDeveloperMode(page, config);
     await uploadSpiraApp(page, spiraappPath);
     await verifyUpload(page, appName);
     await activateSpiraApp(page, appName);
 
     for (const projectId of config.enableProjectIds) {
-      await enableForProduct(page, config.baseUrl, projectId, appName);
+      await toggleForProduct(page, config.baseUrl, projectId, appName, true);
     }
-  } finally {
-    await browser.close();
-  }
+  });
 }
 
 async function runEnableOnly(config, appName) {
-  const browser = await chromium.launch({ headless: false });
-  try {
-    const page = await browser.newPage();
-    await login(page, config);
-    await page.waitForTimeout(1000);
+  await withBrowser(config, async (page) => {
     for (const projectId of config.enableProjectIds) {
-      await enableForProduct(page, config.baseUrl, projectId, appName);
+      await toggleForProduct(page, config.baseUrl, projectId, appName, true);
     }
-  } finally {
-    await browser.close();
-  }
+  });
 }
 
 async function runDisableOnly(config, appName) {
-  const browser = await chromium.launch({ headless: false });
-  try {
-    const page = await browser.newPage();
-    await login(page, config);
-    await page.waitForTimeout(1000);
+  await withBrowser(config, async (page) => {
     for (const projectId of config.disableProjectIds) {
-      await disableForProduct(page, config.baseUrl, projectId, appName);
+      await toggleForProduct(page, config.baseUrl, projectId, appName, false);
     }
-  } finally {
-    await browser.close();
-  }
+  });
 }
 
-module.exports = { parseArgs, deriveOutputFolder, loadEnv, bumpVersion, runBuild, login, enableDeveloperMode, uploadSpiraApp, verifyUpload, activateSpiraApp, runAutomation, runEnableOnly, runDisableOnly, enableForProduct, disableForProduct };
+module.exports = { 
+  parseArgs, 
+  deriveOutputFolder, 
+  loadEnv, 
+  bumpVersion, 
+  runBuild, 
+  login, 
+  enableDeveloperMode, 
+  uploadSpiraApp, 
+  verifyUpload, 
+  activateSpiraApp, 
+  runAutomation, 
+  runEnableOnly, 
+  runDisableOnly, 
+  toggleForProduct,
+  normalizeBaseUrl,
+  readManifest
+};
 
 if (require.main === module) {
   const readline = require('readline');
@@ -580,13 +533,14 @@ if (require.main === module) {
   async function main() {
     const config = loadEnv();
     const { inputFolder } = parseArgs(process.argv);
+    const { manifest } = readManifest(inputFolder);
+    const appName = manifest.name;
 
     // Determine mode from flags or prompt
-    const args = process.argv;
     let mode;
-    if (args.includes('--disable')) {
+    if (process.argv.includes('--disable')) {
       mode = '3';
-    } else if (args.includes('--enable')) {
+    } else if (process.argv.includes('--enable')) {
       mode = '2';
     } else {
       process.stdout.write('\nWhat would you like to do?\n');
@@ -595,12 +549,6 @@ if (require.main === module) {
       process.stdout.write('  3. Disable only\n\n');
       mode = await prompt('Enter 1, 2 or 3: ');
     }
-
-    // Read app name from manifest for modes 2 and 3
-    const yaml = require('js-yaml');
-    const manifestPath = require('path').join(inputFolder, 'manifest.yaml');
-    const manifest = yaml.load(require('fs').readFileSync(manifestPath, 'utf-8'));
-    const appName = manifest.name;
 
     if (mode === '1') {
       const outputFolder = deriveOutputFolder(inputFolder);

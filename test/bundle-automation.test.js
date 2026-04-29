@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const { parseArgs, deriveOutputFolder, loadEnv, bumpVersion } = require('../bundle-automation.js');
+const { parseArgs, deriveOutputFolder, loadEnv, bumpVersion, readManifest } = require('../bundle-automation.js');
 
 // ─── parseArgs ───────────────────────────────────────────────────────────────
 
@@ -214,32 +214,37 @@ describe('bumpVersion', () => {
 
   test('bumps 1.0 to 1.1', () => {
     fs.writeFileSync(manifestPath, 'name: Test\nversion: 1.0\n');
-    const newVersion = bumpVersion(manifestPath);
+    const { manifest, raw } = readManifest(tmpDir);
+    const newVersion = bumpVersion(manifestPath, raw, manifest);
     assert.equal(newVersion, '1.1');
     assert.ok(fs.readFileSync(manifestPath, 'utf-8').includes('version: 1.1'));
   });
 
   test('bumps 1.9 to 1.10', () => {
     fs.writeFileSync(manifestPath, 'name: Test\nversion: 1.9\n');
-    const newVersion = bumpVersion(manifestPath);
+    const { manifest, raw } = readManifest(tmpDir);
+    const newVersion = bumpVersion(manifestPath, raw, manifest);
     assert.equal(newVersion, '1.10');
   });
 
   test('bumps 2.5 to 2.6', () => {
     fs.writeFileSync(manifestPath, 'name: Test\nversion: 2.5\n');
-    const newVersion = bumpVersion(manifestPath);
+    const { manifest, raw } = readManifest(tmpDir);
+    const newVersion = bumpVersion(manifestPath, raw, manifest);
     assert.equal(newVersion, '2.6');
   });
 
   test('handles integer version (1 → 1.1)', () => {
     fs.writeFileSync(manifestPath, 'name: Test\nversion: 1\n');
-    const newVersion = bumpVersion(manifestPath);
+    const { manifest, raw } = readManifest(tmpDir);
+    const newVersion = bumpVersion(manifestPath, raw, manifest);
     assert.equal(newVersion, '1.1');
   });
 
   test('preserves other manifest fields', () => {
     fs.writeFileSync(manifestPath, 'name: My App\nguid: abc-123\nversion: 1.0\nauthor: Dev\n');
-    bumpVersion(manifestPath);
+    const { manifest, raw } = readManifest(tmpDir);
+    bumpVersion(manifestPath, raw, manifest);
     const content = fs.readFileSync(manifestPath, 'utf-8');
     assert.ok(content.includes('name: My App'));
     assert.ok(content.includes('guid: abc-123'));

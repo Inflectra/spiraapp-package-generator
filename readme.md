@@ -8,23 +8,35 @@ The package file is automatically given the correct name based on the SpiraApp's
 - Clone this repo
 - Open the terminal and navigate to the directory where this repo lives
 - Run `npm install` to install the dependencies
-- Copy `.env.example` to `.env` and fill in your Spira credentials (required for automation only)
+- [For Automation Only] Copy `.env.example` to `.env` and fill in your Spira credentials
 
 ## Building a SpiraApp Package
 
 To create a new bundle file manually:
 
-- Run `npm run build` and specify the input and output parameters
-- For example: `npm run build --input="C:\MySpiraApp" --output="C:\BundleStorage"`
-- The --input parameter is a file path to the folder that the manifest.yaml is in
-- The --output parameter is a file path to the folder to save the .spiraapp file to
-- If you want to build the bundle for debug purposes and not minify any JS code add `--debug` to the command
+```bash
+npm run build --input=/path/to/SpiraApp --output=/path/to/output
+```
 
-If there are any errors in the manifest these will be logged in the console.
+**Example:**
+```bash
+npm run build --input=/Users/yourname/MySpiraApp --output=/Users/yourname/Bundles
+```
 
-## Automated Build and Deployment
+- The `--input` parameter is the path to the folder containing `manifest.yaml`
+- The `--output` parameter is the path to the folder where the `.spiraapp` file will be saved
+- If you want to build for debug purposes (no JS minification), add the `--debug` flag:
+  ```bash
+  npm run build --input=/path/to/SpiraApp --output=/path/to/output --debug
+  ```
 
-The `bundle-automation.js` script automates the full workflow: building the package, uploading it to Spira, and enabling it system-wide and/or for specific projects.
+If there are any errors in the manifest, they will be logged in the console.
+
+---
+
+## Developer Automation: Build, Upload, and Deploy
+
+The `bundle-automation.js` script automates the full development workflow: building the package, uploading it to Spira, and enabling it system-wide and/or for specific projects. This is designed for developers who want to quickly iterate and test their SpiraApps.
 
 ### Environment Configuration
 
@@ -49,7 +61,12 @@ SPIRA_DISABLE_PROJECT_IDS=4,5
 Run the automation script:
 
 ```bash
-npm run automate -- --input="C:\MySpiraApp"
+node bundle-automation.js --input=/path/to/SpiraApp
+```
+
+**Example:**
+```bash
+node bundle-automation.js --input=/Users/yourname/MySpiraApp
 ```
 
 The script will prompt you to choose a mode:
@@ -62,20 +79,20 @@ You can skip the prompt by using command-line flags:
 
 ```bash
 # Enable only (no build/upload)
-npm run automate -- --input="C:\MySpiraApp" --enable
+node bundle-automation.js --input=/path/to/SpiraApp --enable
 
 # Disable only
-npm run automate -- --input="C:\MySpiraApp" --disable
+node bundle-automation.js --input=/path/to/SpiraApp --disable
 ```
 
 ### What the Automation Does
 
-- Automatically increments the patch version in manifest.yaml (e.g., 1.0 → 1.1)
-- Builds the .spiraapp package file
-- Logs into your Spira instance using Playwright browser automation
-- Enables Developer Mode in Spira (if not already enabled)
-- Uploads the .spiraapp file to the SpiraApps administration page
-- Activates the SpiraApp system-wide
-- Enables or disables the SpiraApp for specific projects based on environment variables
+1. Automatically increments the patch version in manifest.yaml (e.g., 1.0 → 1.1)
+2. Builds the .spiraapp package file
+3. Logs into your Spira instance using Playwright browser automation (headless)
+4. Enables Developer Mode in Spira (if not already enabled)
+5. Uploads the .spiraapp file to the SpiraApps administration page
+6. Activates the SpiraApp system-wide
+7. Enables or disables the SpiraApp for specific projects based on environment variables
 
 **Note**: Inflectra will never ask you for your spiraapp file, only ever the source code that is used to generate it 
