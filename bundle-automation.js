@@ -13,6 +13,25 @@ const dotenv = require('dotenv');
 const yaml = require('js-yaml');
 const { chromium } = require('playwright');
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TIMEOUTS = {
+  // Browser navigation and page load timeouts
+  NAVIGATION_DEFAULT: 90000,        // 90s - Default timeout for slow Spira instances
+  
+  // Post-action settle times (wait for UI to stabilize)
+  POST_LOGIN_SETTLE: 2000,          // 2s - Wait for post-login redirects to complete
+  POST_LOGIN_INITIAL: 1000,         // 1s - Initial wait after login before automation
+  GRID_RENDER: 2000,                // 2s - Wait for AG Grid to render rows
+  TOGGLE_ACTION_SETTLE: 2000,       // 2s - Wait after toggling project enable/disable
+  ACTIVATION_CONFIRM: 1000,         // 1s - Wait to confirm activation state changed
+  
+  // Element appearance timeouts
+  SIGN_OFF_DIALOG: 3000,            // 3s - Wait for "sign out other sessions" dialog
+  VERIFY_UPLOAD: 30000,             // 30s - Wait for uploaded app to appear in list
+  APP_ROW_APPEAR: 30000,            // 30s - Wait for app row to appear in AG Grid
+};
+
 // Helper: normalize base URL by removing trailing slashes
 function normalizeBaseUrl(url) {
   return url.replace(/\/+$/, '');
@@ -31,24 +50,32 @@ function readManifest(inputFolder) {
  * Accepts:
  *   --input=<value>
  *   --input <value>
+ *   --upload  (optional flag; sets uploadOnly: true)
  *
  * @param {string[]} argv - process.argv (or equivalent)
- * @returns {{ inputFolder: string }}
+ * @returns {{ inputFolder: string, uploadOnly: boolean }}
  */
 function parseArgs(argv) {
   let inputFolder = null;
+  let uploadOnly = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
 
     if (arg.startsWith('--input=')) {
       inputFolder = arg.slice('--input='.length);
-      break;
+      continue;
     }
 
     if (arg === '--input' && i + 1 < argv.length) {
       inputFolder = argv[i + 1];
-      break;
+      i++; // skip the next arg (the value)
+      continue;
+    }
+
+    if (arg === '--upload') {
+      uploadOnly = true;
+      continue;
     }
   }
 
@@ -71,7 +98,7 @@ function parseArgs(argv) {
     process.exit(1);
   }
 
-  return { inputFolder: resolvedInput };
+  return { inputFolder: resolvedInput, uploadOnly };
 }
 
 /**
@@ -101,12 +128,15 @@ function loadEnv() {
   }
 
   const required = ['SPIRA_BASE_URL', 'SPIRA_USERNAME', 'SPIRA_PASSWORD'];
-  const missing = required.filter((key) => !process.env[key]);
+  const missing = required.filter((key) => !process.env[key] || process.env[key].trim() === '');
 
   if (missing.length > 0) {
+    process.stderr.write('\nError: Missing required environment variables:\n');
     for (const key of missing) {
-      process.stderr.write(`Error: Missing required environment variable: ${key}\n`);
+      process.stderr.write(`  - ${key}\n`);
     }
+    process.stderr.write('\nPlease ensure your .env file contains all required variables.\n');
+    process.stderr.write('See .env.example for reference.\n\n');
     process.exit(1);
   }
 
@@ -114,6 +144,9 @@ function loadEnv() {
     baseUrl: process.env.SPIRA_BASE_URL,
     username: process.env.SPIRA_USERNAME,
     password: process.env.SPIRA_PASSWORD,
+    headless: process.env.PLAYWRIGHT_HEADLESS === 'true',
+    enableDevMode: process.env.SPIRA_ENABLE_DEV_MODE === 'true',
+    incrementVersion: process.env.SPIRA_INCREMENT_VERSION === 'true',
     enableProjectIds: process.env.SPIRA_ENABLE_PROJECT_IDS
       ? process.env.SPIRA_ENABLE_PROJECT_IDS.split(',').map(id => id.trim()).filter(Boolean)
       : [],
@@ -162,18 +195,21 @@ function bumpVersion(manifestPath, raw, manifest) {
  *
  * @param {string} inputFolder  - absolute path to the SpiraApp source folder
  * @param {string} outputFolder - absolute path to the destination folder
+ * @param {boolean} [incrementVersion=false] - when true, bumps the patch version in manifest.yaml before building
  * @returns {{ spiraappPath: string, appName: string }}
  */
-function runBuild(inputFolder, outputFolder) {
+function runBuild(inputFolder, outputFolder, incrementVersion = false) {
   // 1. Ensure output folder exists
   fs.mkdirSync(outputFolder, { recursive: true });
 
   const resolvedInput  = path.resolve(inputFolder);
   const resolvedOutput = path.resolve(outputFolder);
 
-  // Auto-increment version in manifest.yaml before building
+  // Optionally auto-increment version in manifest.yaml before building
   const { manifest, manifestPath, raw } = readManifest(resolvedInput);
-  bumpVersion(manifestPath, raw, manifest);
+  if (incrementVersion) {
+    bumpVersion(manifestPath, raw, manifest);
+  }
 
   // 2. Temporarily set env vars (index.js reads these at module load time)
   const prevInput  = process.env.npm_config_input;
@@ -252,15 +288,21 @@ async function login(page, config) {
   await page.fill('input[name="txtPassword"], input[id*="Password"], input[type="password"]', config.password);
   await page.click('input[type="submit"], button[type="submit"]');
 
-  // Wait for navigation to settle
+  // Wait for navigation to settle - Spira may redirect to last visited page
   await page.waitForLoadState('networkidle');
 
-  // Handle "sign out other sessions" dialog if it appears
-  const signOutBtn = page.locator('input[type="submit"], button[type="submit"]').filter({ hasText: /sign out|logout|ok|yes|continue/i });
-  const hasSignOutDialog = await signOutBtn.isVisible().catch(() => false);
-  if (hasSignOutDialog) {
-    await signOutBtn.first().click();
-    await page.waitForLoadState('networkidle');
+  // Handle "sign out other sessions" dialog — Spira shows this when the account
+  // is already logged in elsewhere. The page renders an <a> tag with a known ID
+  // that triggers __doPostBack to sign off other locations.
+  try {
+    const signOffBtn = page.locator('#cplMainContent_btnSignOffOthers');
+    const visible = await signOffBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    if (visible) {
+      await signOffBtn.click();
+      await page.waitForLoadState('networkidle');
+    }
+  } catch {
+    // No sign-out dialog appeared — continue normally
   }
 
   // Detect failure: error element visible OR URL still contains "Login"
@@ -271,9 +313,15 @@ async function login(page, config) {
 
   if (errorVisible || currentUrl.includes('Login')) {
     throw new Error(
-      `Login failed for user "${config.username}". Check credentials and Spira instance availability.`
+      `Login failed for user "${config.username}". ` +
+      'Check credentials and Spira instance availability. ' +
+      'If a "sign out other sessions" dialog appeared and was not handled, try running again.'
     );
   }
+
+  // Wait a bit longer to ensure any post-login redirects have completed
+  // This prevents race conditions where Spira redirects to the last visited page
+  await page.waitForTimeout(2000);
 }
 
 /**
@@ -287,7 +335,7 @@ async function login(page, config) {
  * @param {{ baseUrl: string }} config
  */
 async function enableDeveloperMode(page, config) {
-  await page.goto(`${normalizeBaseUrl(config.baseUrl)}/Administration/GeneralSettings.aspx`);
+  await page.goto(`${normalizeBaseUrl(config.baseUrl)}/Administration/GeneralSettings.aspx`, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
 
   // Locate the Developer Mode checkbox by its known id
@@ -315,18 +363,13 @@ async function enableDeveloperMode(page, config) {
  *
  * @param {import('playwright').Page} page
  * @param {string} spiraappPath - absolute path to the .spiraapp file
+ * @param {{ baseUrl: string }} config - environment configuration
  */
-async function uploadSpiraApp(page, spiraappPath) {
-  // Derive the base URL from the current page URL
-  const currentUrl = new URL(page.url());
-  const pathParts = currentUrl.pathname.split('/').filter(Boolean);
-  const adminIdx = pathParts.indexOf('Administration');
-  const basePath = adminIdx > 0
-    ? '/' + pathParts.slice(0, adminIdx).join('/')
-    : '';
-  const spiraAppsUrl = `${currentUrl.protocol}//${currentUrl.host}${basePath}/Administration/SpiraApps.aspx`;
+async function uploadSpiraApp(page, spiraappPath, config) {
+  const spiraAppsUrl = `${normalizeBaseUrl(config.baseUrl)}/Administration/SpiraApps.aspx`;
 
-  await page.goto(spiraAppsUrl);
+  // Navigate with waitUntil 'domcontentloaded' to be more resilient to redirects
+  await page.goto(spiraAppsUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
 
   // Target the .spiraapp file input by its known name attribute
@@ -451,36 +494,105 @@ async function toggleForProduct(page, baseUrl, projectId, appName, enable) {
 }
 
 /**
+ * Translate a raw Playwright or network error into a clean, actionable message.
+ * Strips internal stack noise and adds context so headless failures are diagnosable.
+ *
+ * @param {Error} err - the caught error
+ * @param {string} [context] - optional label for where the error occurred
+ * @returns {string} human-readable error message (never contains the password)
+ */
+function formatError(err, context) {
+  const prefix = context ? `[${context}] ` : '';
+  const msg = err && err.message ? err.message : String(err);
+
+  // Playwright timeout
+  if (msg.includes('Timeout') || msg.includes('timeout')) {
+    return `${prefix}Timed out waiting for the page to respond. ` +
+      'Check that the Spira instance is reachable and the URL is correct.';
+  }
+  // Network / navigation failures
+  if (msg.includes('net::ERR') || msg.includes('NS_ERROR') || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND')) {
+    return `${prefix}Could not reach the Spira instance. ` +
+      'Verify SPIRA_BASE_URL is correct and the server is accessible.';
+  }
+  // Browser process crash
+  if (msg.includes('Target closed') || msg.includes('Session closed') || msg.includes('browser has been closed')) {
+    return `${prefix}The browser closed unexpectedly. ` +
+      'This can happen if the system is low on memory or the Spira page crashed.';
+  }
+  // Element not found / selector failures
+  if (msg.includes('waiting for selector') || msg.includes('locator.') || msg.includes('strict mode violation')) {
+    return `${prefix}Could not find an expected element on the page. ` +
+      'The Spira UI may have changed or the page did not load correctly.';
+  }
+  // Pass through messages that are already descriptive (thrown by our own helpers)
+  return `${prefix}${msg}`;
+}
+
+/**
  * Run browser automation with a callback function.
- * Handles browser launch, login, and cleanup.
+ * Handles browser launch, login, cleanup, and graceful error reporting.
  *
  * @param {object} config - environment configuration
  * @param {Function} callback - async function that receives the page object
  */
 async function withBrowser(config, callback) {
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: config.headless });
+  } catch (err) {
+    throw new Error(formatError(err, 'browser launch'));
+  }
+
   try {
     const page = await browser.newPage();
+
+    // Set generous timeouts for slow Spira instances (90 seconds)
+    page.setDefaultNavigationTimeout(90000);
+    page.setDefaultTimeout(90000);
+
+    // Capture uncaught page errors and console errors in headless mode
+    if (config.headless) {
+      page.on('pageerror', (err) => {
+        process.stderr.write(`[page error] ${err.message}\n`);
+      });
+    }
+
     await login(page, config);
     await page.waitForTimeout(1000);
     await callback(page);
+  } catch (err) {
+    // Re-throw with a clean message — formatError preserves already-clean messages
+    throw new Error(formatError(err));
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {}); // always close, ignore double-close errors
   }
 }
 
 /**
- * Run the full automation: build, upload, activate, and enable for projects.
+ * Run the full automation: build, upload, and optionally activate.
+ *
+ * @param {object} config - environment configuration
+ * @param {string} spiraappPath - absolute path to the .spiraapp file
+ * @param {string} appName - SpiraApp name from manifest.yaml
+ * @param {boolean} [uploadOnly=false] - when true, skip system-wide activation
  */
-async function runAutomation(config, spiraappPath, appName) {
+async function runAutomation(config, spiraappPath, appName, uploadOnly = false) {
   await withBrowser(config, async (page) => {
-    await enableDeveloperMode(page, config);
-    await uploadSpiraApp(page, spiraappPath);
+    if (config.enableDevMode === true) {
+      await enableDeveloperMode(page, config);
+    }
+    await uploadSpiraApp(page, spiraappPath, config);
     await verifyUpload(page, appName);
-    await activateSpiraApp(page, appName);
 
-    for (const projectId of config.enableProjectIds) {
-      await toggleForProduct(page, config.baseUrl, projectId, appName, true);
+    if (uploadOnly === false) {
+      await activateSpiraApp(page, appName);
+
+      for (const projectId of config.enableProjectIds) {
+        await toggleForProduct(page, config.baseUrl, projectId, appName, true);
+      }
+    } else {
+      console.log(`SpiraApp "${appName}" has been built and uploaded successfully (activation skipped).`);
     }
   });
 }
@@ -517,7 +629,8 @@ module.exports = {
   runDisableOnly, 
   toggleForProduct,
   normalizeBaseUrl,
-  readManifest
+  readManifest,
+  formatError
 };
 
 if (require.main === module) {
@@ -532,7 +645,7 @@ if (require.main === module) {
 
   async function main() {
     const config = loadEnv();
-    const { inputFolder } = parseArgs(process.argv);
+    const { inputFolder, uploadOnly } = parseArgs(process.argv);
     const { manifest } = readManifest(inputFolder);
     const appName = manifest.name;
 
@@ -542,6 +655,9 @@ if (require.main === module) {
       mode = '3';
     } else if (process.argv.includes('--enable')) {
       mode = '2';
+    } else if (process.argv.includes('--upload')) {
+      // --upload flag: run build + upload only (mode 1 with uploadOnly: true)
+      mode = '1';
     } else {
       process.stdout.write('\nWhat would you like to do?\n');
       process.stdout.write('  1. Build, upload and enable\n');
@@ -552,9 +668,13 @@ if (require.main === module) {
 
     if (mode === '1') {
       const outputFolder = deriveOutputFolder(inputFolder);
-      const { spiraappPath, appName: builtAppName } = runBuild(inputFolder, outputFolder);
-      await runAutomation(config, spiraappPath, builtAppName);
-      process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built, uploaded, and enabled.\n`);
+      const { spiraappPath, appName: builtAppName } = runBuild(inputFolder, outputFolder, config.incrementVersion);
+      await runAutomation(config, spiraappPath, builtAppName, uploadOnly);
+      if (uploadOnly) {
+        process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built and uploaded.\n`);
+      } else {
+        process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built, uploaded, and enabled.\n`);
+      }
     } else if (mode === '2') {
       await runEnableOnly(config, appName);
       process.stdout.write(`\nDone! SpiraApp "${appName}" has been enabled for projects: ${config.enableProjectIds.join(', ')}\n`);
@@ -570,7 +690,8 @@ if (require.main === module) {
   }
 
   main().catch(err => {
-    process.stderr.write(err.message + '\n');
+    const msg = formatError(err);
+    process.stderr.write(`\nError: ${msg}\n`);
     process.exit(1);
   });
 }
