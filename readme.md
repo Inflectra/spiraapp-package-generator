@@ -112,7 +112,7 @@ What would you like to do?
 You can skip the prompt by passing a flag directly:
 
 ```bash
-# Build, upload, and enable system-wide (default full workflow)
+# Build, upload, and enable system-wide (default of full workflow)
 node bundle-automation.js --input=/path/to/SpiraApp
 # then choose option 1 at the prompt
 

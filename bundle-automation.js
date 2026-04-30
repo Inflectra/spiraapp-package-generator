@@ -13,25 +13,6 @@ const dotenv = require('dotenv');
 const yaml = require('js-yaml');
 const { chromium } = require('playwright');
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const TIMEOUTS = {
-  // Browser navigation and page load timeouts
-  NAVIGATION_DEFAULT: 90000,        // 90s - Default timeout for slow Spira instances
-  
-  // Post-action settle times (wait for UI to stabilize)
-  POST_LOGIN_SETTLE: 2000,          // 2s - Wait for post-login redirects to complete
-  POST_LOGIN_INITIAL: 1000,         // 1s - Initial wait after login before automation
-  GRID_RENDER: 2000,                // 2s - Wait for AG Grid to render rows
-  TOGGLE_ACTION_SETTLE: 2000,       // 2s - Wait after toggling project enable/disable
-  ACTIVATION_CONFIRM: 1000,         // 1s - Wait to confirm activation state changed
-  
-  // Element appearance timeouts
-  SIGN_OFF_DIALOG: 3000,            // 3s - Wait for "sign out other sessions" dialog
-  VERIFY_UPLOAD: 30000,             // 30s - Wait for uploaded app to appear in list
-  APP_ROW_APPEAR: 30000,            // 30s - Wait for app row to appear in AG Grid
-};
-
 // Helper: normalize base URL by removing trailing slashes
 function normalizeBaseUrl(url) {
   return url.replace(/\/+$/, '');
@@ -645,44 +626,47 @@ if (require.main === module) {
 
   async function main() {
     const config = loadEnv();
-    const { inputFolder, uploadOnly } = parseArgs(process.argv);
+    const { inputFolder } = parseArgs(process.argv);
     const { manifest } = readManifest(inputFolder);
     const appName = manifest.name;
 
     // Determine mode from flags or prompt
     let mode;
+    
     if (process.argv.includes('--disable')) {
-      mode = '3';
+      mode = '4';
     } else if (process.argv.includes('--enable')) {
-      mode = '2';
+      mode = '3';
     } else if (process.argv.includes('--upload')) {
-      // --upload flag: run build + upload only (mode 1 with uploadOnly: true)
-      mode = '1';
+      // --upload flag: run build + upload only (mode 2)
+      mode = '2';
     } else {
       process.stdout.write('\nWhat would you like to do?\n');
       process.stdout.write('  1. Build, upload and enable\n');
-      process.stdout.write('  2. Enable only (no build/upload)\n');
-      process.stdout.write('  3. Disable only\n\n');
-      mode = await prompt('Enter 1, 2 or 3: ');
+      process.stdout.write('  2. Build and upload only (no activation)\n');
+      process.stdout.write('  3. Enable only (no build/upload)\n');
+      process.stdout.write('  4. Disable only\n\n');
+      mode = await prompt('Enter 1, 2, 3 or 4: ');
     }
 
     if (mode === '1') {
       const outputFolder = deriveOutputFolder(inputFolder);
       const { spiraappPath, appName: builtAppName } = runBuild(inputFolder, outputFolder, config.incrementVersion);
-      await runAutomation(config, spiraappPath, builtAppName, uploadOnly);
-      if (uploadOnly) {
-        process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built and uploaded.\n`);
-      } else {
-        process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built, uploaded, and enabled.\n`);
-      }
+      await runAutomation(config, spiraappPath, builtAppName, false);
+      process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built, uploaded, and enabled.\n`);
     } else if (mode === '2') {
+      const outputFolder = deriveOutputFolder(inputFolder);
+      const { spiraappPath, appName: builtAppName } = runBuild(inputFolder, outputFolder, config.incrementVersion);
+      await runAutomation(config, spiraappPath, builtAppName, true);
+      process.stdout.write(`\nDone! SpiraApp "${builtAppName}" has been built and uploaded.\n`);
+    } else if (mode === '3') {
       await runEnableOnly(config, appName);
       process.stdout.write(`\nDone! SpiraApp "${appName}" has been enabled for projects: ${config.enableProjectIds.join(', ')}\n`);
-    } else if (mode === '3') {
+    } else if (mode === '4') {
       await runDisableOnly(config, appName);
       process.stdout.write(`\nDone! SpiraApp "${appName}" has been disabled for projects: ${config.disableProjectIds.join(', ')}\n`);
     } else {
-      process.stderr.write('Invalid choice. Please enter 1, 2 or 3.\n');
+      process.stderr.write('Invalid choice. Please enter 1, 2, 3 or 4.\n');
       process.exit(1);
     }
 
