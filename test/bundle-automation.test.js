@@ -229,12 +229,12 @@ describe('loadEnv', () => {
     assert.deepEqual(config.disableProjectIds, []);
   });
 
-  test('returns headless: false when PLAYWRIGHT_HEADLESS is not set', () => {
+  test('returns headless: true when PLAYWRIGHT_HEADLESS is not set', () => {
     process.env.SPIRA_BASE_URL = 'https://example.com';
     process.env.SPIRA_USERNAME = 'admin';
     process.env.SPIRA_PASSWORD = 'secret';
     const config = loadEnv();
-    assert.equal(config.headless, false);
+    assert.equal(config.headless, true);
   });
 
   test('returns headless: true when PLAYWRIGHT_HEADLESS is "true"', () => {

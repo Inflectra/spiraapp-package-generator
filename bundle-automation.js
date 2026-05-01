@@ -125,7 +125,7 @@ function loadEnv() {
     baseUrl: process.env.SPIRA_BASE_URL,
     username: process.env.SPIRA_USERNAME,
     password: process.env.SPIRA_PASSWORD,
-    headless: process.env.PLAYWRIGHT_HEADLESS === 'true',
+    headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
     enableDevMode: process.env.SPIRA_ENABLE_DEV_MODE === 'true',
     incrementVersion: process.env.SPIRA_INCREMENT_VERSION === 'true',
     enableProjectIds: process.env.SPIRA_ENABLE_PROJECT_IDS
