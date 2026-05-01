@@ -13,6 +13,8 @@ const {
   bumpVersion,
   readManifest,
   normalizeBaseUrl,
+  validateSpiraUrl,
+  assertSpiraResponse,
   formatError,
   runBuild,
 } = require('../bundle-automation.js');
@@ -229,12 +231,12 @@ describe('loadEnv', () => {
     assert.deepEqual(config.disableProjectIds, []);
   });
 
-  test('returns headless: false when PLAYWRIGHT_HEADLESS is not set', () => {
+  test('returns headless: true when PLAYWRIGHT_HEADLESS is not set', () => {
     process.env.SPIRA_BASE_URL = 'https://example.com';
     process.env.SPIRA_USERNAME = 'admin';
     process.env.SPIRA_PASSWORD = 'secret';
     const config = loadEnv();
-    assert.equal(config.headless, false);
+    assert.equal(config.headless, true);
   });
 
   test('returns headless: true when PLAYWRIGHT_HEADLESS is "true"', () => {
@@ -556,5 +558,439 @@ describe('runBuild', () => {
     } catch {}
     assert.ok(fs.existsSync(newOutputDir), 'output dir should be created by runBuild');
     fs.rmSync(newOutputDir, { recursive: true, force: true });
+  });
+});
+
+// ─── assertSpiraResponse ─────────────────────────────────────────────────────
+
+describe('assertSpiraResponse', () => {
+  test('does not throw for 200 with text/html content-type', () => {
+    assert.doesNotThrow(() => assertSpiraResponse(200, 'text/html; charset=utf-8'));
+  });
+
+  test('does not throw for 301 redirect with html', () => {
+    assert.doesNotThrow(() => assertSpiraResponse(301, 'text/html'));
+  });
+
+  test('throws for HTTP 404', () => {
+    assert.throws(
+      () => assertSpiraResponse(404, 'text/html'),
+      (err) => err.message.includes('HTTP 404') && err.message.includes('SPIRA_BASE_URL')
+    );
+  });
+
+  test('throws for HTTP 503', () => {
+    assert.throws(
+      () => assertSpiraResponse(503, 'text/html'),
+      (err) => err.message.includes('HTTP 503') && err.message.includes('SPIRA_BASE_URL')
+    );
+  });
+
+  test('throws for any 4xx status', () => {
+    assert.throws(
+      () => assertSpiraResponse(403, 'text/html'),
+      (err) => err.message.includes('HTTP 403')
+    );
+  });
+
+  test('throws for any 5xx status', () => {
+    assert.throws(
+      () => assertSpiraResponse(500, 'text/html'),
+      (err) => err.message.includes('HTTP 500')
+    );
+  });
+
+  test('throws for non-HTML content-type', () => {
+    assert.throws(
+      () => assertSpiraResponse(200, 'application/json'),
+      (err) => err.message.includes('not HTML') && err.message.includes('SPIRA_BASE_URL')
+    );
+  });
+
+  test('does not throw when content-type is empty string', () => {
+    assert.doesNotThrow(() => assertSpiraResponse(200, ''));
+  });
+});
+
+// ─── validateSpiraUrl ────────────────────────────────────────────────────────
+
+describe('validateSpiraUrl', () => {
+  test('throws for malformed URL', async () => {
+    await assert.rejects(
+      () => validateSpiraUrl('not-a-url'),
+      (err) => err.message.includes('not a valid URL')
+    );
+  });
+
+  test('throws for non-http protocol', async () => {
+    await assert.rejects(
+      () => validateSpiraUrl('ftp://example.com'),
+      (err) => err.message.includes('not a valid URL')
+    );
+  });
+
+  test('throws for unreachable host', async () => {
+    await assert.rejects(
+      () => validateSpiraUrl('http://this-host-does-not-exist-xyz123.invalid'),
+      (err) => err.message.includes('Could not reach Spira instance')
+    );
+  });
+});
+
+// ─── Mock Helpers ────────────────────────────────────────────────────────────
+
+const {
+  login,
+  enableDeveloperMode,
+  uploadSpiraApp,
+  verifyUpload,
+  activateSpiraApp,
+  toggleForProduct,
+} = require('../bundle-automation.js');
+
+/**
+ * Create a mock Playwright page object.
+ * Override specific methods per test via the `overrides` parameter.
+ */
+function createMockPage(overrides = {}) {
+  const locatorObj = {
+    isVisible: async () => false,
+    isChecked: async () => false,
+    click: async () => {},
+    dispatchEvent: async () => {},
+    setInputFiles: async () => {},
+    fill: async () => {},
+    first: () => locatorObj,
+    filter: () => locatorObj,
+    waitFor: async () => {},
+    nth: () => locatorObj,
+    count: async () => 0,
+    getAttribute: async () => '',
+    innerText: async () => '',
+    locator: () => locatorObj,
+    ...overrides.locator,
+  };
+
+  return {
+    goto: async () => ({ status: () => 200, headers: () => ({ 'content-type': 'text/html' }) }),
+    fill: async () => {},
+    click: async () => {},
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    waitForSelector: async () => {},
+    url: () => 'https://example.com/Dashboard.aspx',
+    locator: () => locatorObj,
+    setDefaultNavigationTimeout: () => {},
+    setDefaultTimeout: () => {},
+    on: () => {},
+    evaluate: async () => {},
+    ...overrides,
+  };
+}
+
+// ─── login ───────────────────────────────────────────────────────────────────
+
+describe('login', () => {
+  const config = { baseUrl: 'https://example.com', username: 'admin', password: 'secret' };
+
+  test('succeeds when page navigates away from Login', async () => {
+    const page = createMockPage();
+    await assert.doesNotReject(() => login(page, config));
+  });
+
+  test('throws when response status is 404', async () => {
+    const page = createMockPage({
+      goto: async () => ({ status: () => 404, headers: () => ({ 'content-type': 'text/html' }) }),
+    });
+    await assert.rejects(
+      () => login(page, config),
+      (err) => err.message.includes('HTTP 404')
+    );
+  });
+
+  test('throws when response status is 503', async () => {
+    const page = createMockPage({
+      goto: async () => ({ status: () => 503, headers: () => ({ 'content-type': 'text/html' }) }),
+    });
+    await assert.rejects(
+      () => login(page, config),
+      (err) => err.message.includes('HTTP 503')
+    );
+  });
+
+  test('throws when URL still contains Login after submit', async () => {
+    const page = createMockPage({
+      url: () => 'https://example.com/Login.aspx',
+    });
+    await assert.rejects(
+      () => login(page, config),
+      (err) => err.message.includes('Login failed')
+    );
+  });
+
+  test('throws when error element is visible on page', async () => {
+    const page = createMockPage({
+      url: () => 'https://example.com/Login.aspx',
+      locator: () => ({
+        isVisible: async () => true,
+        isChecked: async () => false,
+        click: async () => {},
+        dispatchEvent: async () => {},
+        first: function() { return this; },
+        filter: function() { return this; },
+        locator: function() { return this; },
+      }),
+    });
+    await assert.rejects(
+      () => login(page, config),
+      (err) => err.message.includes('Login failed')
+    );
+  });
+
+  test('handles sign-out-others dialog when visible', async () => {
+    let signOffClicked = false;
+    const signOffLocator = {
+      isVisible: async () => true,
+      click: async () => { signOffClicked = true; },
+    };
+
+    const page = createMockPage({
+      locator: (selector) => {
+        if (selector === '#cplMainContent_btnSignOffOthers') {
+          return signOffLocator;
+        }
+        return { isVisible: async () => false };
+      },
+    });
+
+    await login(page, config);
+    assert.equal(signOffClicked, true, 'Should have clicked the sign-off button');
+  });
+});
+
+// ─── enableDeveloperMode ─────────────────────────────────────────────────────
+
+describe('enableDeveloperMode', () => {
+  const config = { baseUrl: 'https://example.com' };
+
+  test('clicks checkbox when not already checked', async () => {
+    let dispatched = false;
+    let saved = false;
+
+    const page = createMockPage({
+      locator: (selector) => {
+        if (selector.includes('chkSpiraAppDeveloperMode')) {
+          return {
+            isChecked: async () => false,
+            dispatchEvent: async () => { dispatched = true; },
+          };
+        }
+        return {
+          first: () => ({ click: async () => { saved = true; } }),
+        };
+      },
+    });
+
+    await enableDeveloperMode(page, config);
+    assert.equal(dispatched, true, 'Should dispatch click on unchecked checkbox');
+    assert.equal(saved, true, 'Should click save button');
+  });
+
+  test('does not click checkbox when already checked', async () => {
+    let dispatched = false;
+    let saved = false;
+
+    const page = createMockPage({
+      locator: (selector) => {
+        if (selector.includes('chkSpiraAppDeveloperMode')) {
+          return {
+            isChecked: async () => true,
+            dispatchEvent: async () => { dispatched = true; },
+          };
+        }
+        return {
+          first: () => ({ click: async () => { saved = true; } }),
+        };
+      },
+    });
+
+    await enableDeveloperMode(page, config);
+    assert.equal(dispatched, false, 'Should NOT dispatch click on already-checked checkbox');
+    assert.equal(saved, true, 'Should still click save button');
+  });
+});
+
+// ─── uploadSpiraApp ──────────────────────────────────────────────────────────
+
+describe('uploadSpiraApp', () => {
+  const config = { baseUrl: 'https://example.com' };
+
+  test('sets input files and clicks upload button', async () => {
+    let filesSet = null;
+    let uploadClicked = false;
+
+    const page = createMockPage({
+      locator: (selector) => {
+        if (selector.includes('inputFileSpiraAppPackage')) {
+          return { setInputFiles: async (f) => { filesSet = f; } };
+        }
+        if (selector === '#btnInstallSpiraAppPackage') {
+          return { click: async () => { uploadClicked = true; } };
+        }
+        return { setInputFiles: async () => {}, click: async () => {} };
+      },
+    });
+
+    await uploadSpiraApp(page, '/path/to/app.spiraapp', config);
+    assert.equal(filesSet, '/path/to/app.spiraapp');
+    assert.equal(uploadClicked, true);
+  });
+});
+
+// ─── verifyUpload ────────────────────────────────────────────────────────────
+
+describe('verifyUpload', () => {
+  test('resolves when waitForSelector succeeds', async () => {
+    const page = createMockPage();
+    await assert.doesNotReject(() => verifyUpload(page, 'MyApp'));
+  });
+
+  test('throws descriptive error when app does not appear', async () => {
+    const page = createMockPage({
+      waitForSelector: async () => { throw new Error('Timeout'); },
+    });
+    await assert.rejects(
+      () => verifyUpload(page, 'MyApp'),
+      (err) => err.message.includes('did not appear') && err.message.includes('MyApp')
+    );
+  });
+});
+
+// ─── activateSpiraApp ────────────────────────────────────────────────────────
+
+describe('activateSpiraApp', () => {
+  test('does nothing when app is already active', async () => {
+    let evaluated = false;
+    const rowLocator = {
+      waitFor: async () => {},
+      locator: () => ({ isVisible: async () => false }),
+    };
+
+    const page = createMockPage({
+      locator: () => ({ filter: () => rowLocator }),
+      evaluate: async () => { evaluated = true; },
+    });
+
+    await activateSpiraApp(page, 'MyApp');
+    assert.equal(evaluated, false, 'Should not call evaluate when already active');
+  });
+
+  test('activates when app is inactive', async () => {
+    let evaluatedWith = null;
+    const rowLocator = {
+      waitFor: async () => {},
+      locator: (sel) => {
+        if (sel === 'i.fa-times') {
+          return { isVisible: async () => evaluatedWith !== null ? false : true };
+        }
+        if (sel.includes('activateSpiraApp')) {
+          return { getAttribute: async () => 'activateSpiraApp(42)' };
+        }
+        return { isVisible: async () => false };
+      },
+    };
+
+    const page = createMockPage({
+      locator: () => ({ filter: () => rowLocator }),
+      evaluate: async (fn, id) => { evaluatedWith = id; },
+    });
+
+    await activateSpiraApp(page, 'MyApp');
+    assert.equal(evaluatedWith, 42);
+  });
+
+  test('throws when plugin ID cannot be determined', async () => {
+    const rowLocator = {
+      waitFor: async () => {},
+      locator: (sel) => {
+        if (sel === 'i.fa-times') {
+          return { isVisible: async () => true };
+        }
+        if (sel.includes('activateSpiraApp')) {
+          return { getAttribute: async () => 'someOtherFunction()' };
+        }
+        return { isVisible: async () => false };
+      },
+    };
+
+    const page = createMockPage({
+      locator: () => ({ filter: () => rowLocator }),
+    });
+
+    await assert.rejects(
+      () => activateSpiraApp(page, 'MyApp'),
+      (err) => err.message.includes('Could not determine plugin ID')
+    );
+  });
+});
+
+// ─── toggleForProduct ────────────────────────────────────────────────────────
+
+describe('toggleForProduct', () => {
+  test('logs already enabled when no activate links found', async () => {
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => logs.push(args.join(' '));
+
+    const page = createMockPage({
+      locator: () => ({ count: async () => 0 }),
+    });
+
+    await toggleForProduct(page, 'https://example.com', '3', 'MyApp', true);
+    console.log = originalLog;
+
+    assert.ok(logs.some(l => l.includes('already enabled')));
+  });
+
+  test('logs already disabled when no deactivate links found', async () => {
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => logs.push(args.join(' '));
+
+    const page = createMockPage({
+      locator: () => ({ count: async () => 0 }),
+    });
+
+    await toggleForProduct(page, 'https://example.com', '3', 'MyApp', false);
+    console.log = originalLog;
+
+    assert.ok(logs.some(l => l.includes('already disabled')));
+  });
+
+  test('clicks the matching link when app row is found', async () => {
+    let dispatched = false;
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => logs.push(args.join(' '));
+
+    const linkLocator = {
+      count: async () => 1,
+      nth: () => ({
+        locator: () => ({
+          first: () => ({ innerText: async () => 'MyApp v1.0' }),
+        }),
+        dispatchEvent: async () => { dispatched = true; },
+      }),
+    };
+
+    const page = createMockPage({
+      locator: () => linkLocator,
+    });
+
+    await toggleForProduct(page, 'https://example.com', '3', 'MyApp', true);
+    console.log = originalLog;
+
+    assert.equal(dispatched, true, 'Should dispatch click on matching link');
+    assert.ok(logs.some(l => l.includes('enabled') && l.includes('project 3')));
   });
 });

@@ -62,30 +62,16 @@ This script is designed for developers who want to quickly iterate and test Spir
 
 Copy `.env.example` to `.env` and fill in your values:
 
-```
-# Required
-SPIRA_BASE_URL=https://your-spira-instance.example.com
-SPIRA_USERNAME=your_username
-SPIRA_PASSWORD=your_password
-
-# Optional
-SPIRA_ENABLE_PROJECT_IDS=1,2,3
-SPIRA_DISABLE_PROJECT_IDS=4,5
-PLAYWRIGHT_HEADLESS=
-SPIRA_ENABLE_DEV_MODE=
-SPIRA_INCREMENT_VERSION=
-```
-
-| Variable | Required | Description |
-|---|---|---|
-| `SPIRA_BASE_URL` | Yes | Base URL of your Spira instance |
-| `SPIRA_USERNAME` | Yes | Your Spira username |
-| `SPIRA_PASSWORD` | Yes | Your Spira password |
-| `SPIRA_ENABLE_PROJECT_IDS` | No | Comma-separated project IDs to enable the SpiraApp for |
-| `SPIRA_DISABLE_PROJECT_IDS` | No | Comma-separated project IDs to disable the SpiraApp for |
-| `PLAYWRIGHT_HEADLESS` | No | Set to `true` to run the browser in headless mode. Default is headed (visible browser). |
-| `SPIRA_ENABLE_DEV_MODE` | No | Set to `true` to enable Developer Mode in Spira General Settings before uploading. Default is skipped — only needed the first time or if Developer Mode has been turned off. |
-| `SPIRA_INCREMENT_VERSION` | No | Set to `true` to auto-increment the patch version in `manifest.yaml` before each build (e.g. `1.0` → `1.1`). Default is off — the version in `manifest.yaml` is used as-is. |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SPIRA_BASE_URL` | Yes | — | Base URL of your Spira instance |
+| `SPIRA_USERNAME` | Yes | — | Your Spira username |
+| `SPIRA_PASSWORD` | Yes | — | Your Spira password |
+| `SPIRA_ENABLE_PROJECT_IDS` | No | _(none)_ | Comma-separated project IDs to enable the SpiraApp for |
+| `SPIRA_DISABLE_PROJECT_IDS` | No | _(none)_ | Comma-separated project IDs to disable the SpiraApp for |
+| `PLAYWRIGHT_HEADLESS` | No | `true` | Set to `false` to run the browser in headed mode (visible window). Default is headless (no visible browser). |
+| `SPIRA_ENABLE_DEV_MODE` | No | `false` | Set to `true` to enable Developer Mode in Spira General Settings before uploading. Only needed the first time or if Developer Mode has been turned off. |
+| `SPIRA_INCREMENT_VERSION` | No | `false` | Set to `true` to auto-increment the patch version in `manifest.yaml` before each build (e.g. `1.0` → `1.1`). Default is off — the version in `manifest.yaml` is used as-is. |
 
 ### Running the Script
 
@@ -151,7 +137,7 @@ Logs into Spira and disables the SpiraApp for the projects listed in `SPIRA_DISA
 
 ### Important Notes
 
-**Activation is idempotent — it does not toggle**
+**Activation is enabled/disabled — it does not toggle**
 
 Running the enable/activate script when the SpiraApp is already enabled will not disable it. The script checks the current state first and only acts if a change is needed.
 

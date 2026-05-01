@@ -18,6 +18,89 @@ function normalizeBaseUrl(url) {
   return url.replace(/\/+$/, '');
 }
 
+/**
+ * Validate that the SPIRA_BASE_URL points to a reachable Spira instance.
+ *
+ * Two error categories:
+ *  1. Invalid URL — malformed or wrong protocol (caught before any network call)
+ *  2. Unreachable — server didn't respond correctly (DNS, timeout, HTTP errors, non-HTML)
+ *
+ * @param {string} baseUrl - the SPIRA_BASE_URL value
+ * @returns {Promise<void>}
+ */
+async function validateSpiraUrl(baseUrl) {
+  const normalized = normalizeBaseUrl(baseUrl);
+
+  // Category 1: Invalid URL format
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(
+      `SPIRA_BASE_URL is not a valid URL: "${baseUrl}"\n` +
+      'Expected format: https://your-instance.spiraservice.net'
+    );
+  }
+
+  if (!parsed.protocol.startsWith('http')) {
+    throw new Error(
+      `SPIRA_BASE_URL is not a valid URL: "${baseUrl}"\n` +
+      'Expected format: https://your-instance.spiraservice.net'
+    );
+  }
+
+  // Category 2: Unreachable — attempt a lightweight fetch with timeout
+  const loginUrl = `${normalized}/Login.aspx`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(loginUrl, {
+      method: 'GET',
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { 'User-Agent': 'SpiraApp-Package-Generator/1.0' },
+    });
+
+    clearTimeout(timeout);
+    assertSpiraResponse(response.status, response.headers.get('content-type') || '');
+  } catch (err) {
+    clearTimeout(timeout);
+
+    // Re-throw our own errors from assertSpiraResponse
+    if (err.message.includes('SPIRA_BASE_URL')) throw err;
+
+    throw new Error(
+      `Could not reach Spira instance at: ${normalized}\n` +
+      'Please verify SPIRA_BASE_URL is correct and the server is accessible.'
+    );
+  }
+}
+
+/**
+ * Assert that an HTTP response looks like a valid Spira login page.
+ * Shared by both the pre-flight fetch and the Playwright login check.
+ *
+ * @param {number} status - HTTP status code
+ * @param {string} contentType - Content-Type header value
+ */
+function assertSpiraResponse(status, contentType) {
+  if (status >= 400) {
+    throw new Error(
+      `Spira instance returned HTTP ${status}.\n` +
+      'The server may be down or the URL may not point to a valid Spira instance.\n' +
+      'Please verify SPIRA_BASE_URL in your .env file.'
+    );
+  }
+
+  if (contentType && !contentType.includes('text/html')) {
+    throw new Error(
+      `SPIRA_BASE_URL does not appear to be a Spira instance (response was not HTML).\n` +
+      'Please verify SPIRA_BASE_URL in your .env file.'
+    );
+  }
+}
+
 // Helper: read and parse manifest.yaml
 function readManifest(inputFolder) {
   const manifestPath = path.join(inputFolder, 'manifest.yaml');
@@ -125,7 +208,7 @@ function loadEnv() {
     baseUrl: process.env.SPIRA_BASE_URL,
     username: process.env.SPIRA_USERNAME,
     password: process.env.SPIRA_PASSWORD,
-    headless: process.env.PLAYWRIGHT_HEADLESS === 'true',
+    headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
     enableDevMode: process.env.SPIRA_ENABLE_DEV_MODE === 'true',
     incrementVersion: process.env.SPIRA_INCREMENT_VERSION === 'true',
     enableProjectIds: process.env.SPIRA_ENABLE_PROJECT_IDS
@@ -246,7 +329,7 @@ function runBuild(inputFolder, outputFolder, incrementVersion = false) {
 
   return { 
     spiraappPath: path.join(resolvedOutput, spiraappFile), 
-    appName: manifest.name 
+    appName: manifest.caption 
   };
 }
 
@@ -262,7 +345,12 @@ function runBuild(inputFolder, outputFolder, incrementVersion = false) {
  */
 async function login(page, config) {
   const base = normalizeBaseUrl(config.baseUrl);
-  await page.goto(`${base}/Login.aspx`);
+  const response = await page.goto(`${base}/Login.aspx`);
+
+  // Fail fast if the server returned an error status (reuses shared validation)
+  if (response) {
+    assertSpiraResponse(response.status(), response.headers()['content-type'] || '');
+  }
 
   // Fill credentials and submit
   await page.fill('input[name="txtUserName"], input[id*="UserName"], input[type="text"]', config.username);
@@ -518,6 +606,9 @@ function formatError(err, context) {
  * @param {Function} callback - async function that receives the page object
  */
 async function withBrowser(config, callback) {
+  // Validate the Spira URL before launching the browser — fail fast on bad URLs
+  await validateSpiraUrl(config.baseUrl);
+
   let browser;
   try {
     browser = await chromium.launch({ headless: config.headless });
@@ -610,6 +701,8 @@ module.exports = {
   runDisableOnly, 
   toggleForProduct,
   normalizeBaseUrl,
+  validateSpiraUrl,
+  assertSpiraResponse,
   readManifest,
   formatError
 };
