@@ -62,7 +62,7 @@ function validateManifest(manifest) {
     const DASHBOARD_TYPE_ID_MIN = 1;
     const DASHBOARD_TYPE_ID_MAX = 6;
     const SETTING_TYPE_ID_MIN = 1;
-    const SETTING_TYPE_ID_MAX = 12;
+    const SETTING_TYPE_ID_MAX = 14;
     const ACTION_TYPE_ID_MIN = 1;
     const ACTION_TYPE_ID_MAX = 2;
 
@@ -130,14 +130,16 @@ function validateManifest(manifest) {
         { name: "description", required: false, type: typeEnums.string, max: false }
     ];
     const settingProps = [
-        { name: "settingTypeId", required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MAX },    
-        { name: "name",          required: true,  type: typeEnums.string, max: 255 },    
-        { name: "caption",       required: true,  type: typeEnums.string, max: 50 },     
-        { name: "placeholder",   required: false, type: typeEnums.string, max: 255 },  
-        { name: "tooltip",       required: false, type: typeEnums.string, max: 255 },   
-        { name: "isSecure",      required: false, type: typeEnums.boolean },   
-        { name: "position",      required: false, type: typeEnums.int, min: 1, max: false },   
-        { name: "settingGroup",  required: false, type: typeEnums.string, max: 50 }
+        { name: "settingTypeId",      required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MAX },    
+        { name: "name",               required: true,  type: typeEnums.string, max: 255 },    
+        { name: "caption",            required: true,  type: typeEnums.string, max: 50 },     
+        { name: "placeholder",        required: false, type: typeEnums.string, max: 255 },  
+        { name: "tooltip",            required: false, type: typeEnums.string, max: 255 },   
+        { name: "isSecure",           required: false, type: typeEnums.boolean },   
+        { name: "position",           required: false, type: typeEnums.int, min: 1, max: false },   
+        { name: "settingGroup",       required: false, type: typeEnums.string, max: 50 },
+        { name: "value",              required: false, type: typeEnums.string, max: 255 },
+        { name: "defaultSettingName", required: false, type: typeEnums.string, max: 255 }
     ];   
     const productSettingProps = [
         { name: "settingTypeId",  required: true,  type: typeEnums.int,    min: SETTING_TYPE_ID_MIN, max: SETTING_TYPE_ID_MAX },    
