@@ -3,6 +3,7 @@
 const yaml = require('js-yaml');
 const fs   = require('fs');
 const UglifyJS = require("uglify-js");
+const esbuild = require('esbuild');
 
 const FILE_PREFIX = "file://";
 const FILENAME_WITH_PREFIX_REGEX = /file:\/\/[^/\\]+?\.\w+/g;
@@ -20,6 +21,7 @@ const typeEnums = {
 const FOLDER_INPUT = process.env.npm_config_input ? (process.env.npm_config_input + "/") : "";
 const FOLDER_OUTPUT = process.env.npm_config_output ? (process.env.npm_config_output + "/") : "";
 const IS_DEBUG = process.env.npm_config_debug ? true : false;
+let bundleErrors = 0;
 
 /* EXAMPLE USAGE
 if your code is in a folder C:\work-in-progress
@@ -45,7 +47,11 @@ exports.package = function() {
         const guid = manifest.guid;
         const name = manifest.name;
         const bundle = createBundle(manifest);
-        saveFile(bundle, guid, name);
+        if (bundle === null) {
+            console.log('SpiraApp bundle NOT created due to compilation errors. Please fix and try again.');
+        } else {
+            saveFile(bundle, guid, name);
+        }
     } else {
         console.log('SpiraApp bundle NOT created due to errors in the manifest. Please fix and try again.')
     }
@@ -313,8 +319,11 @@ function checkValueForErrors(description, value, type, min, max) {
 // Creates a bundle file from a json manifest, including all referenced external files
 // @param: manifest: the manifest file converted to JSON
 function createBundle(manifest) {
-
+    bundleErrors = 0;
     const output = findAndReplace(JSON.stringify(manifest), FILENAME_WITH_PREFIX_REGEX, injectFile, null);
+    if (bundleErrors > 0) {
+        return null;
+    }
     return output;
 }
 
@@ -335,16 +344,46 @@ function injectFile(match, parentExtension) {
     const fileName = match.replace(FILE_PREFIX, "");
     const extension = fileName.split('.').pop().toLowerCase();
 
-    // use the readFileSync() function and pass the path to the file
-    // use the toString() method to convert buffer into String
-    const buffer = fs.readFileSync(`${FOLDER_INPUT}${fileName}`, 'utf-8');
-    const fileContents = buffer.toString();
-    let processedContents = fileContents;
-    
-    // process any file links inside a CSS or JS file
-    if (extension == "js" || extension == "css") {
-        processedContents = findAndReplace(processedContents, FILENAME_WITH_PREFIX_REGEX, injectFile, extension);
+    let processedContents;
+    // Check if we are injecting a tsx or jsx file: esbuild handles file reading and bundling for those files
+    if (extension === "tsx") {
+        const { code, errors } = compileTsx(FOLDER_INPUT + fileName);
+        if (errors.length > 0) {
+            errors.forEach(err => console.log(formatEsbuildError(fileName, err)));
+            bundleErrors++;
+            return match;
+        }
+        processedContents = code;
+
+        // Warn about file:// patterns in compiled TSX output (don't resolve them)
+        const filePatternMatches = processedContents.match(FILENAME_WITH_PREFIX_REGEX);
+        if (filePatternMatches) {
+            filePatternMatches.forEach(pattern => {
+                console.log(`Warning: file:// pattern found in compiled TSX output of ${fileName}. Use import statements instead.`);
+            });
+        }
+    } else if (extension == 'jsx') {
+        const { code, errors } = compileJsx(FOLDER_INPUT + fileName);
+        if (errors.length > 0) {
+            errors.forEach(err => console.log(formatEsbuildError(fileName, err)));
+            bundleErrors++;
+            return match;
+        }
+        processedContents = code;
+    } else {
+        // use the readFileSync() function and pass the path to the file
+        // use the toString() method to convert buffer into String
+        const buffer = fs.readFileSync(`${FOLDER_INPUT}${fileName}`, 'utf-8');
+        const fileContents = buffer.toString();
+        processedContents = fileContents;
+        
+        // process any file links inside a CSS or JS file
+        if (extension == "js" || extension == "css") {
+            processedContents = findAndReplace(processedContents, FILENAME_WITH_PREFIX_REGEX, injectFile, extension);
+        }
     }
+
+
     // In debug mode, we do not minify JS files, otherwise we minify them
     if (!IS_DEBUG && extension == "js") {
         // attempt to minify - if there is an error, use the original file contents
@@ -374,13 +413,63 @@ function isEncodeCheck(extension, parentExtension) {
     if (parentExtension == extension) {
         return false;
     //If embedding a file into a JS file, don't encode certain filetypes
-    } else if (parentExtension == "js") {
+    } else if (parentExtension == "js" || parentExtension == "jsx") {
         const doNotEncodeList = ["js", "json", "html", "txt", "md"];
         return !doNotEncodeList.includes(extension);
     } else {
         return true;
     } 
 }
+
+// Formats an esbuild error into the bundler's standard error string.
+// @param fileName: string = the TSX file that caused the error
+// @param error: object = an esbuild error object with .text and .location properties
+function formatEsbuildError(fileName, error) {
+    if (error.location) {
+        return `Error in ${fileName} (line ${error.location.line}, col ${error.location.column}): ${error.text}`;
+    }
+    return `Error in ${fileName}: ${error.text}`;
+}
+
+// Compiles a TSX file using esbuild and returns the bundled JavaScript string.
+// @param filePath: string = absolute or FOLDER_INPUT-relative path to the .tsx file
+// @returns {{ code: string, errors: Array }} - The compiled JS code, or empty string + errors
+function compileTsx(filePath) {
+    return compileWithEsbuild(filePath, {'.tsx': 'tsx', '.ts': 'ts'})
+}
+
+// Compiles a JSX file using esbuild and returns the bundled JavaScript string.
+// @param filePath: string = absolute or FOLDER_INPUT-relative path to the .jsx file
+// @returns {{ code: string, errors: Array }} - The compiled JS code, or empty string + errors
+function compileJsx(filePath) {
+    return compileWithEsbuild(filePath, {'.jsx': 'jsx'})
+}
+
+function compileWithEsbuild(filePath, loader) {
+    try {
+        const result = esbuild.buildSync({
+            entryPoints: [filePath],
+            bundle: true,
+            format: 'iife',
+            write: false,
+            target: ['es2015'],
+            platform: 'browser',
+            packages: 'external',
+            loader: loader,
+            jsx: 'transform',
+            jsxFactory: 'React.createElement',
+            jsxFragment: 'React.Fragment',
+            logLevel: 'silent',
+        });
+        return { code: result.outputFiles[0].text, errors: [] };
+    } catch (error) {
+        return { code: '', errors: error.errors };
+    }
+}
+
+exports.formatEsbuildError = formatEsbuildError;
+exports.compileJsx = compileJsx;
+exports.compileTsx = compileTsx;
 
 // Saves the final bundle to the designated folder with the correct name and extension
 // @param bundle: object = the final bundle object with all files embedded
